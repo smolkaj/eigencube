@@ -314,13 +314,14 @@ module Heap = struct
     up h.size;
     h.size <- h.size + 1
 
-  let pop h =
+  let pop h dummy =
     if h.size = 0 then None
     else begin
       let res = h.data.(0) in
       h.size <- h.size - 1;
       if h.size > 0 then begin
         let lp = h.prio.(h.size) and lx = h.data.(h.size) in
+        h.data.(h.size) <- dummy;
         let rec down i =
           let l = (i lsl 1) + 1 in
           let r = l + 1 in
@@ -366,10 +367,15 @@ let astar start is_goal heuristic random_weight max_moves =
       and cost_so_far = Hashtbl.Poly.create () in
       Heap.push frontier 0.0 start;
       Hashtbl.set cost_so_far ~key:start ~data:0;
-      let simulated = ref 0 and exceeded = ref false and solution = ref None in
-      while Option.is_none !solution && not !exceeded do
-        match Heap.pop frontier with
-        | None -> exceeded := true
+      let simulated = ref 0
+      and budget_exceeded = ref false
+      and solution = ref None in
+      let frontier_active = ref true in
+      while
+        Option.is_none !solution && (not !budget_exceeded) && !frontier_active
+      do
+        match Heap.pop frontier start with
+        | None -> frontier_active := false
         | Some src ->
           let last_m =
             match Hashtbl.find came_from src with
@@ -377,7 +383,7 @@ let astar start is_goal heuristic random_weight max_moves =
             | None -> None
           in
           for m = 0 to num_moves - 1 do
-            if Option.is_none !solution && not !exceeded then begin
+            if Option.is_none !solution && not !budget_exceeded then begin
               let skip =
                 match last_m with
                 | Some lm -> m = inv_move.(lm) || opposite_pruned lm m
@@ -388,7 +394,7 @@ let astar start is_goal heuristic random_weight max_moves =
                 Int.incr simulated;
                 Int.incr total_moves_simulated;
                 let cost = Hashtbl.find_exn cost_so_far src + 1 in
-                if !simulated >= budget then exceeded := true;
+                if !simulated >= budget then budget_exceeded := true;
                 match Hashtbl.find cost_so_far dst with
                 | Some c when c <= cost -> ()
                 | _ ->
@@ -402,10 +408,10 @@ let astar start is_goal heuristic random_weight max_moves =
                     in
                     solution := Some (dst, unwind dst [])
                   end
-                  else if not !exceeded then begin
+                  else if not !budget_exceeded then begin
                     let hw =
                       if Float.(random_weight > 0.0) then
-                        random_gauss 1.0 random_weight
+                        Float.max 0.01 (random_gauss 1.0 random_weight)
                       else 1.0
                     in
                     Heap.push frontier
@@ -419,11 +425,15 @@ let astar start is_goal heuristic random_weight max_moves =
       match !solution with
       | Some s -> Some s
       | None ->
-        let tm = Unix.localtime (Unix.gettimeofday ()) in
-        printf
-          "[%02d:%02d:%02d] search budget of %d moves exceeded; restarting\n%!"
-          tm.tm_hour tm.tm_min tm.tm_sec budget;
-        attempt (Float.to_int (Float.of_int budget *. 1.5))
+        if (not !budget_exceeded) || Float.(random_weight <= 0.0) then None
+        else begin
+          let tm = Unix.localtime (Unix.gettimeofday ()) in
+          printf
+            "[%02d:%02d:%02d] search budget of %d moves exceeded; restarting\n\
+             %!"
+            tm.tm_hour tm.tm_min tm.tm_sec budget;
+          attempt (Float.to_int (Float.of_int budget *. 1.5))
+        end
     in
     attempt max_moves
 
@@ -584,7 +594,7 @@ let solve cube =
     (Float.of_int !total_moves_simulated /. Float.max 0.001 elapsed);
   moves
 
-let () =
+let main () =
   let args = Sys.get_argv () in
   let seed = if Array.length args > 1 then Int.of_string args.(1) else 42 in
   log "Solving scrambled cube (seed=%d)..." seed;

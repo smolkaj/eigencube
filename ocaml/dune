@@ -1,3 +1,14 @@
-(executable
+(library
  (name rubix)
+ (modules rubix)
  (libraries base stdio unix))
+
+(executable
+ (name main)
+ (modules main)
+ (libraries rubix base stdio unix))
+
+(test
+ (name test_rubix)
+ (modules test_rubix)
+ (libraries rubix base stdio unix))
