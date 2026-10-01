@@ -2,3 +2,7 @@
 .DS_Store
 __*__
 *_env
+_build
+*.cmi
+*.cmx
+*.o
