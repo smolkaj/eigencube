@@ -86,6 +86,7 @@ let is_cubelet_solved c r =
   let sticker_directions = r *@* colors in
   sticker_directions = colors
 
+let is_cube_solved cube = Iarray.for_all2 is_cubelet_solved cubelets cube
 let is_cubelet_pos_solved c r = r *@ c = c
 let solved_cube : Cube.t = Iarray.init num_cubelets (fun _ -> id3)
 
@@ -95,8 +96,6 @@ let apply_move m cube : Cube.t =
       let r = Iarray.get cube i in
       if dot v (r *@ Iarray.get cubelets i) > 0 then rm *@* r else r
   )
-
-let is_cube_solved cube = Iarray.for_all2 is_cubelet_solved cubelets cube
 
 let single_cubelet_bfs c r is_goal =
   if is_goal c r then 0
