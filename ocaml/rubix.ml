@@ -425,6 +425,7 @@ let shuffle cube iters seed =
 
 let solve cube =
   let t0 = Unix.gettimeofday () in
+  let start_sim = !total_moves_simulated in
   let c1, s1 =
     solve_layer "solving cubelet" 17
       (fun i c ->
@@ -479,15 +480,26 @@ let solve cube =
   let c4, s4 = solve_endgame c3 in
   let moves = List.concat [ s1; s2; s3; s4 ] in
   let elapsed = Unix.gettimeofday () -. t0 in
+  let moves_simulated = !total_moves_simulated - start_sim in
   log "Solved cube in %d moves." (List.length moves);
   log "is_cube_solved: %b" (is_cube_solved c4);
   log "- time elapsed: %.2f sec" elapsed;
-  log "- moves simulated: %d (%.0f moves/sec)" !total_moves_simulated
-    (Float.of_int !total_moves_simulated /. Float.max 0.001 elapsed);
+  log "- moves simulated: %d (%.0f moves/sec)" moves_simulated
+    (Float.of_int moves_simulated /. Float.max 0.001 elapsed);
   moves
 
 let main () =
   let args = Sys.get_argv () in
-  let seed = if Array.length args > 1 then Int.of_string args.(1) else 42 in
-  log "Solving scrambled cube (seed=%d)..." seed;
-  ignore (solve (shuffle (solved_cube ()) 100_000 seed))
+  if
+    Array.length args > 1
+    && (String.equal args.(1) "--help" || String.equal args.(1) "-h")
+  then begin
+    printf "Usage: dune exec ocaml/main.exe -- [seed]\n";
+    printf
+      "Solves a Rubik's cube scrambled from the given random seed (default: 42).\n"
+  end
+  else begin
+    let seed = if Array.length args > 1 then Int.of_string args.(1) else 42 in
+    log "Solving scrambled cube (seed=%d)..." seed;
+    ignore (solve (shuffle (solved_cube ()) 100_000 seed))
+  end

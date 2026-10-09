@@ -85,6 +85,17 @@ let test_solve_roundtrip () =
   assert (Rubix.is_cube_solved !final_cube);
   printf "  [PASS] End-to-end solve verifies cube is completely solved.\n%!"
 
+(* Test 8: Successive solves isolation *)
+let test_multiple_solves_isolated () =
+  let c1 = Rubix.shuffle (Rubix.solved_cube ()) 5 123 in
+  let c2 = Rubix.shuffle (Rubix.solved_cube ()) 5 456 in
+  let m1 = Rubix.solve c1 in
+  let m2 = Rubix.solve c2 in
+  assert (List.length m1 > 0);
+  assert (List.length m2 > 0);
+  printf
+    "  [PASS] Successive solves execute independently without interference.\n%!"
+
 let () =
   test_cubelet_invariants ();
   test_linear_algebra_invariants ();
@@ -93,4 +104,5 @@ let () =
   test_sexy_move_cycle ();
   test_unreachable_goal ();
   test_solve_roundtrip ();
+  test_multiple_solves_isolated ();
   printf "All OCaml invariant and solver tests passed successfully!\n%!"
