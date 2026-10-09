@@ -81,14 +81,6 @@ let inv_move =
       Array.findi_exn moves ~f:(fun _ mv -> mv = inv) |> fst
   )
 
-(* Opposite face moves commute; prune duplicate branches by enforcing canonical order *)
-let opposite_pruned lm m =
-  let x1, y1, z1 = moves.(lm).normal and x2, y2, z2 = moves.(m).normal in
-  (x1 > x2 || (x1 = x2 && (y1 > y2 || (y1 = y2 && z1 > z2))))
-  && x1 = -x2
-  && y1 = -y2
-  && z1 = -z2
-
 let is_cubelet_solved c r =
   let colors = diag c in
   let sticker_directions = r *@* colors in
@@ -224,10 +216,16 @@ let reconstruct came_from dst =
   in
   (dst, loop dst [])
 
-let should_prune last_move m =
+(* Prune branches that immediately invert the previous move, or that apply
+   commuting moves on opposite faces (e.g. L R vs R L) in non-canonical order. *)
+let should_prune last_move move =
   match last_move with
   | None -> false
-  | Some lm -> m = inv_move.(lm) || opposite_pruned lm m
+  | Some prev ->
+    move = inv_move.(prev)
+    ||
+    let n1 = moves.(prev).normal and n2 = moves.(move).normal in
+    dot n1 n2 = -1 && Poly.(n1 > n2)
 
 (* Multi-phase A* search with move-budgeted restarts (1.5x expansion) *)
 let astar start is_goal heuristic random_weight max_moves =
@@ -236,25 +234,26 @@ let astar start is_goal heuristic random_weight max_moves =
     let cost_so_far = Hashtbl.create (module Cube) ~size:8192 in
     Hashtbl.set cost_so_far ~key:start ~data:0;
 
-    let rec expand_moves src last_move m frontier simulated =
-      if m = num_moves || simulated >= budget then
+    let rec expand_moves src last_move move frontier simulated =
+      if move = num_moves || simulated >= budget then
         `Continue (frontier, simulated)
-      else if should_prune last_move m then
-        expand_moves src last_move (m + 1) frontier simulated
+      else if should_prune last_move move then
+        expand_moves src last_move (move + 1) frontier simulated
       else begin
         Int.incr total_moves_simulated;
         let simulated = simulated + 1 in
-        let dst = apply_move m src in
+        let dst = apply_move move src in
         let cost = Hashtbl.find_exn cost_so_far src + 1 in
         let dominated =
           match Hashtbl.find cost_so_far dst with
           | Some c -> c <= cost
           | None -> false
         in
-        if dominated then expand_moves src last_move (m + 1) frontier simulated
+        if dominated then
+          expand_moves src last_move (move + 1) frontier simulated
         else begin
           Hashtbl.set cost_so_far ~key:dst ~data:cost;
-          Hashtbl.set came_from ~key:dst ~data:(src, m);
+          Hashtbl.set came_from ~key:dst ~data:(src, move);
           if is_goal dst then `Found (reconstruct came_from dst)
           else
             let hw =
@@ -263,7 +262,7 @@ let astar start is_goal heuristic random_weight max_moves =
               else 1.0
             in
             let prio = Float.of_int cost +. (hw *. heuristic dst) in
-            expand_moves src last_move (m + 1)
+            expand_moves src last_move (move + 1)
               (Fheap.add frontier (prio, dst))
               simulated
         end
