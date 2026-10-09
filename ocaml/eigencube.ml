@@ -10,12 +10,17 @@ type vec = int * int * int [@@deriving compare, hash, sexp]
 type mat = vec * vec * vec [@@deriving compare, hash, sexp]
 type move = { normal : vec; dir : int } [@@deriving compare, sexp]
 
-(* Hook required by [@@deriving hash] for array types in Base *)
-let hash_fold_array f state arr = Array.fold arr ~init:state ~f
+module Iarray = struct
+  include Stdlib.Iarray
+
+  let hash_fold_t f state arr = fold_left (fun s x -> f s x) state arr
+  let sexp_of_t sexp_of_x arr = sexp_of_array sexp_of_x (to_array arr)
+  let t_of_sexp x_of_sexp sexp = of_array (array_of_sexp x_of_sexp sexp)
+end
 
 (* 26 cubelets, each mapped to its current 3x3 rotation matrix *)
 module Cube = struct
-  type t = mat array [@@deriving compare, hash, sexp]
+  type t = mat Iarray.t [@@deriving compare, hash, sexp]
 end
 
 let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
@@ -49,9 +54,9 @@ let all_vectors =
   )
 
 let cubelets =
-  all_vectors |> List.filter ~f:(fun v -> norm1 v > 0) |> Array.of_list
+  all_vectors |> List.filter ~f:(fun v -> norm1 v > 0) |> Iarray.of_list
 
-let num_cubelets = Array.length cubelets
+let num_cubelets = Iarray.length cubelets
 let unit_vectors = List.filter all_vectors ~f:(fun v -> norm1 v = 1)
 
 let moves =
@@ -89,16 +94,16 @@ let is_cubelet_solved c r =
   sticker_directions = colors
 
 let is_cubelet_pos_solved c r = r *@ c = c
-let solved_cube () : Cube.t = Array.create ~len:num_cubelets id3
+let solved_cube () : Cube.t = Iarray.init num_cubelets (fun _ -> id3)
 
 let apply_move m cube : Cube.t =
   let v = moves.(m).normal and rm = rot_matrices.(m) in
-  Array.init num_cubelets ~f:(fun i ->
-      let r = cube.(i) in
-      if dot v (r *@ cubelets.(i)) > 0 then rm *@* r else r
+  Iarray.init num_cubelets (fun i ->
+      let r = Iarray.get cube i in
+      if dot v (r *@ Iarray.get cubelets i) > 0 then rm *@* r else r
   )
 
-let is_cube_solved cube = Array.for_all2_exn cubelets cube ~f:is_cubelet_solved
+let is_cube_solved cube = Iarray.for_all2 is_cubelet_solved cubelets cube
 
 let single_cubelet_bfs c r is_goal =
   if is_goal c r then 0
@@ -145,10 +150,18 @@ let min_moves_to_pos c r =
       single_cubelet_bfs c r is_cubelet_pos_solved
   )
 
+let fold2 a b ~init ~f =
+  let len = Iarray.length a in
+  let rec loop i acc =
+    if i = len then acc
+    else loop (i + 1) (f acc (Iarray.get a i) (Iarray.get b i))
+  in
+  loop 0 init
+
 let top_layer_heuristic cube =
   let p = 0.5 in
   let sum =
-    Array.fold2_exn cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
+    fold2 cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
         if z = 1 then acc +. (Float.of_int (min_moves_to_solved c r) **. p)
         else acc
     )
@@ -158,7 +171,7 @@ let top_layer_heuristic cube =
 let middle_layer_heuristic cube =
   let p = 0.5 in
   let sum =
-    Array.fold2_exn cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
+    fold2 cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
         if z >= 0 then acc +. (Float.of_int (min_moves_to_solved c r) **. p)
         else acc
     )
@@ -168,7 +181,7 @@ let middle_layer_heuristic cube =
 let bottom_layer_edge_heuristic cube =
   let p = 0.5 in
   let sum =
-    Array.fold2_exn cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
+    fold2 cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
         if not (z = -1 && norm1 c = 3) then
           acc +. (Float.of_int (min_moves_to_solved c r) **. p)
         else acc
@@ -179,7 +192,7 @@ let bottom_layer_edge_heuristic cube =
 let bottom_layer_corner_heuristic cube =
   let p = 0.5 in
   let s1, s2, s3 =
-    Array.fold2_exn cubelets cube ~init:(0.0, 0.0, 0.0)
+    fold2 cubelets cube ~init:(0.0, 0.0, 0.0)
       ~f:(fun (s1, s2, s3) ((_, _, z) as c) r ->
         if z = 1 then
           (s1 +. (Float.of_int (min_moves_to_solved c r) **. p), s2, s3)
@@ -310,24 +323,36 @@ let astar start is_goal heuristic random_weight max_moves =
     in
     attempt max_moves
 
+let count_matching f cube =
+  let len = Iarray.length cube in
+  let rec loop i acc =
+    if i = len then acc
+    else
+      let inc =
+        if f (Iarray.get cubelets i) (Iarray.get cube i) then 1 else 0
+      in
+      loop (i + 1) (acc + inc)
+  in
+  loop 0 0
+
 let count_solved pred cube =
-  Array.counti cube ~f:(fun i r ->
-      pred cubelets.(i) && is_cubelet_solved cubelets.(i) r
-  )
+  count_matching (fun c r -> pred c && is_cubelet_solved c r) cube
 
 let count_bottom_edges_positioned cube =
-  Array.counti cube ~f:(fun i r ->
-      let c = cubelets.(i) in
+  count_matching
+    (fun c r ->
       let _, _, z = c in
       z = -1 && norm1 c = 2 && r *@ (0, 0, -1) = (0, 0, -1)
-  )
+    )
+    cube
 
 let count_bottom_corners_positioned cube =
-  Array.counti cube ~f:(fun i r ->
-      let c = cubelets.(i) in
+  count_matching
+    (fun c r ->
       let _, _, z = c in
       z = -1 && norm1 c = 3 && is_cubelet_pos_solved c r
-  )
+    )
+    cube
 
 let log fmt =
   let tm = Unix.localtime (Unix.gettimeofday ()) in
@@ -350,9 +375,14 @@ let solve_layer name total is_goal heuristic rw cube =
 
 let bottom_left_front_corner cube =
   let target = (1, -1, -1) in
-  Array.find_mapi_exn cube ~f:(fun i r ->
-      if r *@ cubelets.(i) = target then Some (i, r) else None
-  )
+  let len = Iarray.length cube in
+  let rec loop i =
+    if i = len then failwith "Corner not found"
+    else
+      let r = Iarray.get cube i in
+      if r *@ Iarray.get cubelets i = target then (i, r) else loop (i + 1)
+  in
+  loop 0
 
 let find_move n d =
   Array.findi_exn moves ~f:(fun _ m -> m.normal = n && m.dir = d) |> fst
@@ -381,7 +411,9 @@ let solve_endgame cube =
     let bm = rot_matrices.(bottom) in
     let rec check k rot =
       k < 4
-      && (is_cubelet_solved cubelets.(c_idx) rot || check (k + 1) (bm *@* rot))
+      && (is_cubelet_solved (Iarray.get cubelets c_idx) rot
+         || check (k + 1) (bm *@* rot)
+         )
     in
     check 0 r
   in
