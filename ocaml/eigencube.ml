@@ -13,7 +13,6 @@ type move = { normal : vec; dir : int } [@@deriving compare, sexp]
 module Iarray = struct
   include Stdlib.Iarray
 
-  let ( .%() ) = get
   let hash_fold_t f state arr = fold_left (fun s x -> f s x) state arr
   let sexp_of_t sexp_of_x arr = sexp_of_array sexp_of_x (to_array arr)
   let t_of_sexp x_of_sexp sexp = of_array (array_of_sexp x_of_sexp sexp)
