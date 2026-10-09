@@ -258,18 +258,18 @@ let should_prune last_move m =
 (* Multi-phase A* search with move-budgeted restarts (1.5x expansion) *)
 let astar start is_goal heuristic random_weight max_moves =
   let rec attempt budget =
-    let frontier = ref (push_heap empty_heap 0.0 start) in
     let came_from = Hashtbl.create (module Cube) ~size:8192 in
     let cost_so_far = Hashtbl.create (module Cube) ~size:8192 in
     Hashtbl.set cost_so_far ~key:start ~data:0;
-    let simulated = ref 0 in
-    let frontier_exhausted = ref false in
-    let solution = ref None in
 
-    let step_move src last_move m =
-      if not (should_prune last_move m) then begin
-        Int.incr simulated;
+    let rec expand_moves src last_move m frontier simulated =
+      if m = num_moves || simulated >= budget then
+        `Continue (frontier, simulated)
+      else if should_prune last_move m then
+        expand_moves src last_move (m + 1) frontier simulated
+      else begin
         Int.incr total_moves_simulated;
+        let simulated = simulated + 1 in
         let dst = apply_move m src in
         let cost = Hashtbl.find_exn cost_so_far src + 1 in
         let dominated =
@@ -277,47 +277,47 @@ let astar start is_goal heuristic random_weight max_moves =
           | Some c -> c <= cost
           | None -> false
         in
-        if not dominated then begin
+        if dominated then expand_moves src last_move (m + 1) frontier simulated
+        else begin
           Hashtbl.set cost_so_far ~key:dst ~data:cost;
           Hashtbl.set came_from ~key:dst ~data:(src, m);
-          if is_goal dst then solution := Some (reconstruct came_from dst)
-          else if !simulated < budget then
+          if is_goal dst then `Found (reconstruct came_from dst)
+          else
             let hw =
               if Float.(random_weight > 0.0) then
                 Float.max 0.01 (random_gauss 1.0 random_weight)
               else 1.0
             in
             let prio = Float.of_int cost +. (hw *. heuristic dst) in
-            frontier := push_heap !frontier prio dst
+            expand_moves src last_move (m + 1)
+              (push_heap frontier prio dst)
+              simulated
         end
       end
     in
 
-    while
-      Option.is_none !solution
-      && (not !frontier_exhausted)
-      && !simulated < budget
-    do
-      match pop_heap !frontier with
-      | None -> frontier_exhausted := true
-      | Some (src, rest) ->
-        frontier := rest;
+    let rec search frontier simulated =
+      match pop_heap frontier with
+      | None -> None
+      | Some (src, rest_frontier) -> (
         let last_move = Option.map ~f:snd (Hashtbl.find came_from src) in
-        for m = 0 to num_moves - 1 do
-          if Option.is_none !solution && !simulated < budget then
-            step_move src last_move m
-        done
-    done;
-
-    match !solution with
-    | Some s -> Some s
-    | None when !frontier_exhausted || Float.(random_weight <= 0.0) -> None
-    | None ->
-      let tm = Unix.localtime (Unix.gettimeofday ()) in
-      printf
-        "[%02d:%02d:%02d] search budget of %d moves exceeded; restarting\n%!"
-        tm.tm_hour tm.tm_min tm.tm_sec budget;
-      attempt (Float.to_int (Float.of_int budget *. 1.5))
+        match expand_moves src last_move 0 rest_frontier simulated with
+        | `Found solution -> Some solution
+        | `Continue (next_frontier, next_simulated) ->
+          if next_simulated >= budget then
+            if Float.(random_weight <= 0.0) then None
+            else begin
+              let tm = Unix.localtime (Unix.gettimeofday ()) in
+              printf
+                "[%02d:%02d:%02d] search budget of %d moves exceeded; restarting\n\
+                 %!"
+                tm.tm_hour tm.tm_min tm.tm_sec budget;
+              attempt (Float.to_int (Float.of_int budget *. 1.5))
+            end
+          else search next_frontier next_simulated
+      )
+    in
+    search (push_heap empty_heap 0.0 start) 0
   in
   if is_goal start then Some (start, []) else attempt max_moves
 
