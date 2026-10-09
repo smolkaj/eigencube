@@ -4,55 +4,16 @@
 
 open Base
 open Stdio
+open Poly
 
-module Vec = struct
-  type t = int * int * int [@@deriving compare, equal, hash, sexp]
-
-  let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
-  let dot (x1, y1, z1) (x2, y2, z2) = (x1 * x2) + (y1 * y2) + (z1 * z2)
-end
-
-type vec = Vec.t [@@deriving compare, equal, hash, sexp]
-
-module Mat = struct
-  type t = Vec.t * Vec.t * Vec.t [@@deriving compare, equal, hash, sexp]
-
-  let transpose ((a, b, c), (d, e, f), (g, h, i)) : t =
-    ((a, d, g), (b, e, h), (c, f, i))
-
-  let mul_vec ((m00, m01, m02), (m10, m11, m12), (m20, m21, m22)) (x, y, z) :
-      Vec.t =
-    ( (m00 * x) + (m01 * y) + (m02 * z),
-      (m10 * x) + (m11 * y) + (m12 * z),
-      (m20 * x) + (m21 * y) + (m22 * z)
-    )
-
-  let mul (r0, r1, r2) m : t =
-    let c0, c1, c2 = transpose m in
-    ( (Vec.dot r0 c0, Vec.dot r0 c1, Vec.dot r0 c2),
-      (Vec.dot r1 c0, Vec.dot r1 c1, Vec.dot r1 c2),
-      (Vec.dot r2 c0, Vec.dot r2 c1, Vec.dot r2 c2)
-    )
-
-  let diag (x, y, z) : t = ((x, 0, 0), (0, y, 0), (0, 0, z))
-  let id3 : t = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
-end
-
-type mat = Mat.t [@@deriving compare, equal, hash, sexp]
-
-module Move = struct
-  type t = { normal : Vec.t; dir : int } [@@deriving compare, equal, sexp]
-end
-
-type move = Move.t [@@deriving compare, equal, sexp]
+type vec = int * int * int [@@deriving compare, hash, sexp]
+type mat = vec * vec * vec [@@deriving compare, hash, sexp]
+type move = { normal : vec; dir : int } [@@deriving compare, sexp]
 
 module Iarray = struct
   include Stdlib.Iarray
 
   let ( .%() ) = get
-  let init n ~f = init n f
-  let for_all2 a b ~f = for_all2 f a b
-  let equal eq a b = length a = length b && for_all2 a b ~f:eq
   let hash_fold_t f state arr = fold_left (fun s x -> f s x) state arr
   let sexp_of_t sexp_of_x arr = sexp_of_array sexp_of_x (to_array arr)
   let t_of_sexp x_of_sexp sexp = of_array (array_of_sexp x_of_sexp sexp)
@@ -62,15 +23,30 @@ let ( .%() ) = Iarray.get
 
 (* 26 cubelets, each mapped to its current 3x3 rotation matrix *)
 module Cube = struct
-  type t = Mat.t Iarray.t [@@deriving compare, equal, hash, sexp]
+  type t = mat Iarray.t [@@deriving compare, hash, sexp]
 end
 
-let norm1 = Vec.norm1
-let dot = Vec.dot
-let ( *@ ) = Mat.mul_vec
-let ( *@* ) = Mat.mul
-let diag = Mat.diag
-let id3 = Mat.id3
+let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
+let dot (x1, y1, z1) (x2, y2, z2) = (x1 * x2) + (y1 * y2) + (z1 * z2)
+
+let ( *@ ) ((m00, m01, m02), (m10, m11, m12), (m20, m21, m22)) (x, y, z) =
+  ( (m00 * x) + (m01 * y) + (m02 * z),
+    (m10 * x) + (m11 * y) + (m12 * z),
+    (m20 * x) + (m21 * y) + (m22 * z)
+  )
+
+let transpose ((a, b, c), (d, e, f), (g, h, i)) =
+  ((a, d, g), (b, e, h), (c, f, i))
+
+let ( *@* ) (r0, r1, r2) m =
+  let c0, c1, c2 = transpose m in
+  ( (dot r0 c0, dot r0 c1, dot r0 c2),
+    (dot r1 c0, dot r1 c1, dot r1 c2),
+    (dot r2 c0, dot r2 c1, dot r2 c2)
+  )
+
+let diag (x, y, z) = ((x, 0, 0), (0, y, 0), (0, 0, z))
+let id3 : mat = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
 let crange = [ -1; 0; 1 ]
 
 let all_vectors =
@@ -89,13 +65,13 @@ let unit_vectors = List.filter all_vectors ~f:(fun v -> norm1 v = 1)
 let moves =
   unit_vectors
   |> List.concat_map ~f:(fun normal ->
-      [ { Move.normal; dir = -1 }; { Move.normal; dir = 1 } ]
+      [ { normal; dir = -1 }; { normal; dir = 1 } ]
   )
   |> Array.of_list
 
 let num_moves = Array.length moves
 
-let rot_mat { Move.normal = x, y, _; dir } =
+let rot_mat { normal = x, y, _; dir } =
   if x <> 0 then ((1, 0, 0), (0, 0, dir), (0, -dir, 0))
   else if y <> 0 then ((0, 0, dir), (0, 1, 0), (-dir, 0, 0))
   else ((0, dir, 0), (-dir, 0, 0), (0, 0, 1))
@@ -104,22 +80,22 @@ let rot_matrices = Array.map moves ~f:rot_mat
 
 let inv_move =
   Array.init num_moves ~f:(fun m ->
-      let inv = { Move.normal = moves.(m).normal; dir = -moves.(m).dir } in
-      Array.findi_exn moves ~f:(fun _ mv -> Move.equal mv inv) |> fst
+      let inv = { normal = moves.(m).normal; dir = -moves.(m).dir } in
+      Array.findi_exn moves ~f:(fun _ mv -> mv = inv) |> fst
   )
 
 let is_cubelet_solved c r =
   let colors = diag c in
   let sticker_directions = r *@* colors in
-  Mat.equal sticker_directions colors
+  sticker_directions = colors
 
-let is_cube_solved cube = Iarray.for_all2 cubelets cube ~f:is_cubelet_solved
-let is_cubelet_pos_solved c r = Vec.equal (r *@ c) c
-let solved_cube : Cube.t = Iarray.init num_cubelets ~f:(fun _ -> id3)
+let is_cube_solved cube = Iarray.for_all2 is_cubelet_solved cubelets cube
+let is_cubelet_pos_solved c r = r *@ c = c
+let solved_cube : Cube.t = Iarray.init num_cubelets (fun _ -> id3)
 
 let apply_move m cube : Cube.t =
   let v = moves.(m).normal and rm = rot_matrices.(m) in
-  Iarray.init num_cubelets ~f:(fun i ->
+  Iarray.init num_cubelets (fun i ->
       let r = cube.%(i) in
       if dot v (r *@ cubelets.%(i)) > 0 then rm *@* r else r
   )
@@ -128,7 +104,7 @@ let single_cubelet_bfs c r ~is_goal =
   With_return.with_return (fun { return } ->
       if is_goal c r then return 0;
       let q = Queue.create () in
-      let visited = Hashtbl.create (module Mat) in
+      let visited = Hashtbl.Poly.create () in
       Queue.enqueue q (r, 0);
       Hashtbl.set visited ~key:r ~data:();
       while not (Queue.is_empty q) do
@@ -145,19 +121,15 @@ let single_cubelet_bfs c r ~is_goal =
       0
   )
 
-module Cubelet_state = struct
-  type t = Vec.t * Mat.t [@@deriving compare, hash, sexp]
-end
-
 (* Lazy distance heuristics *)
-let dist_solved_cache = Hashtbl.create (module Cubelet_state)
+let dist_solved_cache = Hashtbl.Poly.create ()
 
 let min_moves_to_solved c r =
   Hashtbl.find_or_add dist_solved_cache (c, r) ~default:(fun () ->
       single_cubelet_bfs c r ~is_goal:is_cubelet_solved
   )
 
-let dist_pos_cache = Hashtbl.create (module Cubelet_state)
+let dist_pos_cache = Hashtbl.Poly.create ()
 
 let min_moves_to_pos c r =
   Hashtbl.find_or_add dist_pos_cache (c, r) ~default:(fun () ->
@@ -264,7 +236,7 @@ let should_prune last_move move =
     move = inv_move.(prev)
     ||
     let n1 = moves.(prev).normal and n2 = moves.(move).normal in
-    dot n1 n2 = -1 && Vec.compare n1 n2 > 0
+    dot n1 n2 = -1 && Poly.(n1 > n2)
 
 (* Multi-phase A* search with move-budgeted restarts (1.5x expansion) *)
 let astar ~start ~is_goal ~heuristic ~random_weight ~max_moves =
@@ -350,7 +322,7 @@ let count_bottom_edges_positioned cube =
   count_matching
     ~f:(fun c r ->
       let _, _, z = c in
-      z = -1 && norm1 c = 2 && Vec.equal (r *@ (0, 0, -1)) (0, 0, -1)
+      z = -1 && norm1 c = 2 && r *@ (0, 0, -1) = (0, 0, -1)
     )
     cube
 
@@ -391,13 +363,12 @@ let bottom_left_front_corner cube =
     if i = len then failwith "Corner not found"
     else
       let r = cube.%(i) in
-      if Vec.equal (r *@ cubelets.%(i)) target then (i, r) else loop (i + 1)
+      if r *@ cubelets.%(i) = target then (i, r) else loop (i + 1)
   in
   loop 0
 
 let find_move ~normal ~dir =
-  Array.findi_exn moves ~f:(fun _ m -> Vec.equal m.normal normal && m.dir = dir)
-  |> fst
+  Array.findi_exn moves ~f:(fun _ m -> m.normal = normal && m.dir = dir) |> fst
 
 (* Endgame: orient bottom corners using (R' D' R D) * 2/4 and align bottom face *)
 let solve_endgame cube =
