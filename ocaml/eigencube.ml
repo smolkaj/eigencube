@@ -96,34 +96,19 @@ let apply_move m (cube : cube) : cube =
 let is_cube_solved (cube : cube) =
   Array.for_all2_exn cubelets cube ~f:is_cubelet_solved
 
-let hash_mat ((a, b, c), (d, e, f), (g, h, i)) =
-  a
-  + (3 * b)
-  + (9 * c)
-  + (27 * d)
-  + (81 * e)
-  + (243 * f)
-  + (729 * g)
-  + (2187 * h)
-  + (6561 * i)
-
-let hash_cube (arr : cube) =
-  let h = ref 17 in
-  for i = 0 to num_cubelets - 1 do
-    h := (!h * 31) + hash_mat arr.(i)
-  done;
-  !h
-
-module CubeTbl = Stdlib.Hashtbl.Make (struct
-  type t = cube
-
-  let equal = Poly.equal
-  let hash = hash_cube
-end)
-
-(* Lazy distance heuristics *)
-let dist_solved_cache = Hashtbl.Poly.create ()
-let dist_pos_cache = Hashtbl.Poly.create ()
+(* Specialized 26-cubelet full-depth hash key for Base.Hashtbl *)
+let cube_key =
+  Hashable.to_key
+    {
+      hash =
+        (fun cube ->
+          Array.fold cube ~init:17 ~f:(fun acc m ->
+              (acc * 31) + Stdlib.Hashtbl.hash m
+          )
+        );
+      compare = Poly.compare;
+      sexp_of_t = (fun _ -> Sexp.Atom "cube");
+    }
 
 let single_cubelet_bfs c r is_goal =
   if is_goal c r then 0
@@ -152,10 +137,15 @@ let single_cubelet_bfs c r is_goal =
     | Some d -> d
     | None -> 0
 
+(* Lazy distance heuristics *)
+let dist_solved_cache = Hashtbl.Poly.create ()
+
 let min_moves_to_solved c r =
   Hashtbl.find_or_add dist_solved_cache (c, r) ~default:(fun () ->
       single_cubelet_bfs c r is_cubelet_solved
   )
+
+let dist_pos_cache = Hashtbl.Poly.create ()
 
 let min_moves_to_pos c r =
   Hashtbl.find_or_add dist_pos_cache (c, r) ~default:(fun () ->
@@ -244,7 +234,7 @@ let total_moves_simulated = ref 0
 
 let reconstruct came_from dst =
   let rec loop curr acc =
-    match CubeTbl.find_opt came_from curr with
+    match Hashtbl.find came_from curr with
     | Some (p, mv) -> loop p (mv :: acc)
     | None -> acc
   in
@@ -261,9 +251,9 @@ let astar start is_goal heuristic random_weight max_moves =
   else
     let rec attempt budget =
       let frontier = ref (push_heap empty_heap 0.0 start) in
-      let came_from = CubeTbl.create 8192 in
-      let cost_so_far = CubeTbl.create 8192 in
-      CubeTbl.replace cost_so_far start 0;
+      let came_from = Hashtbl.create cube_key ~size:8192 in
+      let cost_so_far = Hashtbl.create cube_key ~size:8192 in
+      Hashtbl.set cost_so_far ~key:start ~data:0;
       let simulated = ref 0 in
       let frontier_exhausted = ref false in
       let solution = ref None in
@@ -273,15 +263,15 @@ let astar start is_goal heuristic random_weight max_moves =
           Int.incr simulated;
           Int.incr total_moves_simulated;
           let dst = apply_move m src in
-          let cost = CubeTbl.find cost_so_far src + 1 in
+          let cost = Hashtbl.find_exn cost_so_far src + 1 in
           let dominated =
-            match CubeTbl.find_opt cost_so_far dst with
+            match Hashtbl.find cost_so_far dst with
             | Some c -> c <= cost
             | None -> false
           in
           if not dominated then begin
-            CubeTbl.replace cost_so_far dst cost;
-            CubeTbl.replace came_from dst (src, m);
+            Hashtbl.set cost_so_far ~key:dst ~data:cost;
+            Hashtbl.set came_from ~key:dst ~data:(src, m);
             if is_goal dst then solution := Some (reconstruct came_from dst)
             else if !simulated < budget then
               let hw =
@@ -304,7 +294,7 @@ let astar start is_goal heuristic random_weight max_moves =
         | None -> frontier_exhausted := true
         | Some (src, rest) ->
           frontier := rest;
-          let last_move = Option.map ~f:snd (CubeTbl.find_opt came_from src) in
+          let last_move = Option.map ~f:snd (Hashtbl.find came_from src) in
           for m = 0 to num_moves - 1 do
             if Option.is_none !solution && !simulated < budget then
               step_move src last_move m
