@@ -80,7 +80,8 @@ let opposite_pruned lm m =
 
 let is_cubelet_solved c r =
   let colors = diag c in
-  r *@* colors = colors
+  let sticker_directions = r *@* colors in
+  sticker_directions = colors
 
 let is_cubelet_pos_solved c r = r *@ c = c
 let solved_cube () : cube = Array.create ~len:num_cubelets id3
