@@ -67,8 +67,7 @@ let rot_matrices = Array.map moves ~f:rot_mat
 let inv_move =
   Array.init num_moves ~f:(fun m ->
       let inv = { normal = moves.(m).normal; dir = -moves.(m).dir } in
-      let rec find i = if moves.(i) = inv then i else find (i + 1) in
-      find 0
+      Array.findi_exn moves ~f:(fun _ mv -> mv = inv) |> fst
   )
 
 (* Opposite face moves commute; prune duplicate branches by enforcing canonical order *)
@@ -95,10 +94,7 @@ let apply_move m (cube : cube) : cube =
   )
 
 let is_cube_solved (cube : cube) =
-  let rec loop i =
-    i = num_cubelets || (is_cubelet_solved cubelets.(i) cube.(i) && loop (i + 1))
-  in
-  loop 0
+  Array.for_all2_exn cubelets cube ~f:is_cubelet_solved
 
 let hash_mat ((a, b, c), (d, e, f), (g, h, i)) =
   a
@@ -328,32 +324,23 @@ let astar start is_goal heuristic random_weight max_moves =
     attempt max_moves
 
 let count_solved pred (cube : cube) =
-  let cnt = ref 0 in
-  for i = 0 to num_cubelets - 1 do
-    if pred cubelets.(i) && is_cubelet_solved cubelets.(i) cube.(i) then
-      Int.incr cnt
-  done;
-  !cnt
+  Array.counti cube ~f:(fun i r ->
+      pred cubelets.(i) && is_cubelet_solved cubelets.(i) r
+  )
 
 let count_bottom_edges_positioned (cube : cube) =
-  let cnt = ref 0 in
-  for i = 0 to num_cubelets - 1 do
-    let c = cubelets.(i) in
-    let _, _, z = c in
-    if z = -1 && norm1 c = 2 then
-      if cube.(i) *@ (0, 0, -1) = (0, 0, -1) then Int.incr cnt
-  done;
-  !cnt
+  Array.counti cube ~f:(fun i r ->
+      let c = cubelets.(i) in
+      let _, _, z = c in
+      z = -1 && norm1 c = 2 && r *@ (0, 0, -1) = (0, 0, -1)
+  )
 
 let count_bottom_corners_positioned (cube : cube) =
-  let cnt = ref 0 in
-  for i = 0 to num_cubelets - 1 do
-    let c = cubelets.(i) in
-    let _, _, z = c in
-    if z = -1 && norm1 c = 3 && is_cubelet_pos_solved c cube.(i) then
-      Int.incr cnt
-  done;
-  !cnt
+  Array.counti cube ~f:(fun i r ->
+      let c = cubelets.(i) in
+      let _, _, z = c in
+      z = -1 && norm1 c = 3 && is_cubelet_pos_solved c r
+  )
 
 let log fmt =
   let tm = Unix.localtime (Unix.gettimeofday ()) in
@@ -375,18 +362,12 @@ let solve_layer name total is_goal heuristic rw cube =
 
 let bottom_left_front_corner (cube : cube) =
   let target = (1, -1, -1) in
-  let rec find i =
-    if i = num_cubelets then failwith "Corner missing"
-    else if cube.(i) *@ cubelets.(i) = target then (i, cube.(i))
-    else find (i + 1)
-  in
-  find 0
+  Array.find_mapi_exn cube ~f:(fun i r ->
+      if r *@ cubelets.(i) = target then Some (i, r) else None
+  )
 
 let find_move n d =
-  let rec loop i =
-    if moves.(i).normal = n && moves.(i).dir = d then i else loop (i + 1)
-  in
-  loop 0
+  Array.findi_exn moves ~f:(fun _ m -> m.normal = n && m.dir = d) |> fst
 
 (* Endgame: orient bottom corners using (R' D' R D) * 2/4 and align bottom face *)
 let solve_endgame (cube : cube) =
