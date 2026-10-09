@@ -74,10 +74,10 @@ def describe_position(vector):
 
 def describe_config(cubelet, rotation):
   colors = np.diag(cubelet)
-  color_positions = rotation @ colors
+  sticker_directions = rotation @ colors
   return ", ".join(sorted(
-     describe_position(pos) + ": " + color_names[tuple(color)]
-     for color, pos in zip(colors.T, color_positions.T)
+     describe_position(direction) + ": " + color_names[tuple(color)]
+     for color, direction in zip(colors.T, sticker_directions.T)
      if any(color)
   ))
 
@@ -203,8 +203,8 @@ def astar(start, is_goal, apply_move, heuristic = lambda _: 0,
 @functools.cache
 def is_cubelet_solved(cubelet, rotation):
   colors = np.diag(cubelet)
-  color_positions = rotation @ colors
-  return np.array_equal(colors, color_positions)
+  sticker_directions = rotation @ colors
+  return np.array_equal(sticker_directions, colors)
 
 def is_cube_solved(cube): return all(is_cubelet_solved(c, r) for c, r in cube)
 
