@@ -1,0 +1,9 @@
+.git
+.agents
+.vscode
+__pycache__
+*.py[cod]
+*_env
+.pytest_cache
+.mypy_cache
+.DS_Store

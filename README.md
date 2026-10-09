@@ -98,6 +98,29 @@ source eigencube_env/bin/activate
 pip install -r requirements.txt
 ```
 
+### Docker
+
+Docker provides a reproducible environment for the test suite and command-line
+solver without installing Python dependencies on the host:
+
+```bash
+# Build the image
+docker build -t eigencube .
+
+# Run the complete test suite (the image's default command)
+docker run --rm eigencube
+
+# Run the command-line solver with the default seed
+docker run --rm eigencube python eigencube.py
+
+# Run the solver with a specific seed
+docker run --rm eigencube python eigencube.py 123
+```
+
+The image uses Pygame's headless video driver. The interactive GUI and physical
+camera scanner are better run from the virtual environment because they require
+access to the host display and camera.
+
 ---
 
 ## Usage
