@@ -42,8 +42,8 @@ let run_tests () =
   printf "  [PASS] Inverse move cancellation verified for all 12 moves.\n%!";
 
   (* Test 5: 6x Sexy Move identity (R U R' U') * 6 = Identity *)
-  let r = find_move (0, 1, 0) 1 in
-  let u = find_move (0, 0, 1) 1 in
+  let r = find_move ~normal:(0, 1, 0) ~dir:1 in
+  let u = find_move ~normal:(0, 0, 1) ~dir:1 in
   let r_inv = inv_move.(r) in
   let u_inv = inv_move.(u) in
   let sexy = [ r; u; r_inv; u_inv ] in
@@ -56,7 +56,12 @@ let run_tests () =
   printf "  [PASS] 6x Sexy Move ((R U R' U') * 6) restores identity.\n%!";
 
   (* Test 6: Deterministic search terminates with None when budget is exceeded *)
-  let result = astar c0 (fun _ -> false) (fun _ -> 0.0) 0.0 500 in
+  let result =
+    astar ~start:c0
+      ~is_goal:(fun _ -> false)
+      ~heuristic:(fun _ -> 0.0)
+      ~random_weight:0.0 ~max_moves:500
+  in
   assert (Option.is_none result);
   printf
     "  [PASS] Budget exhaustion terminates cleanly with None under \
@@ -64,7 +69,7 @@ let run_tests () =
      %!";
 
   (* Test 7: Short scramble solve round-trip *)
-  let scrambled = shuffle solved_cube 10 999 in
+  let scrambled = shuffle ~iters:10 ~seed:999 solved_cube in
   assert (not (is_cube_solved scrambled));
   let sol_moves = solve scrambled in
   let final_cube =
@@ -74,8 +79,8 @@ let run_tests () =
   printf "  [PASS] End-to-end solve verifies cube is completely solved.\n%!";
 
   (* Test 8: Successive solves isolation *)
-  let c1 = shuffle solved_cube 5 123 in
-  let c2 = shuffle solved_cube 5 456 in
+  let c1 = shuffle ~iters:5 ~seed:123 solved_cube in
+  let c2 = shuffle ~iters:5 ~seed:456 solved_cube in
   let m1 = solve c1 in
   let m2 = solve c2 in
   assert (List.length m1 > 0);
