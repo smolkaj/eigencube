@@ -20,7 +20,7 @@ let run_tests () =
     "  [PASS] Linear algebra and R * diag(c) = diag(c) invariant verified.\n%!";
 
   (* Test 3: 4x single-move identity *)
-  let c0 = solved_cube () in
+  let c0 = solved_cube in
   for m = 0 to num_moves - 1 do
     let c1 = apply_move m c0 in
     let c2 = apply_move m c1 in
@@ -50,7 +50,7 @@ let run_tests () =
   let c_sexy =
     Fn.apply_n_times ~n:6
       (fun c -> List.fold sexy ~init:c ~f:(fun acc m -> apply_move m acc))
-      (solved_cube ())
+      solved_cube
   in
   assert (is_cube_solved c_sexy);
   printf "  [PASS] 6x Sexy Move ((R U R' U') * 6) restores identity.\n%!";
@@ -64,7 +64,7 @@ let run_tests () =
      %!";
 
   (* Test 7: Short scramble solve round-trip *)
-  let scrambled = shuffle (solved_cube ()) 10 999 in
+  let scrambled = shuffle solved_cube 10 999 in
   assert (not (is_cube_solved scrambled));
   let sol_moves = solve scrambled in
   let final_cube =
@@ -74,8 +74,8 @@ let run_tests () =
   printf "  [PASS] End-to-end solve verifies cube is completely solved.\n%!";
 
   (* Test 8: Successive solves isolation *)
-  let c1 = shuffle (solved_cube ()) 5 123 in
-  let c2 = shuffle (solved_cube ()) 5 456 in
+  let c1 = shuffle solved_cube 5 123 in
+  let c2 = shuffle solved_cube 5 456 in
   let m1 = solve c1 in
   let m2 = solve c2 in
   assert (List.length m1 > 0);

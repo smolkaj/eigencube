@@ -11,13 +11,13 @@ let () =
   match Sys.get_argv () with
   | [| _ |] ->
     log "Solving scrambled cube (seed=42)...";
-    ignore (solve (shuffle (solved_cube ()) 100_000 42))
+    ignore (solve (shuffle solved_cube 100_000 42))
   | [| _; "--help" | "-h" |] -> print_usage ()
   | [| _; s |] -> (
     match Int.of_string_opt s with
     | Some seed ->
       log "Solving scrambled cube (seed=%d)..." seed;
-      ignore (solve (shuffle (solved_cube ()) 100_000 seed))
+      ignore (solve (shuffle solved_cube 100_000 seed))
     | None ->
       printf "Error: unrecognized option or invalid integer seed '%s'.\n\n%!" s;
       print_usage ();
