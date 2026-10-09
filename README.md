@@ -6,9 +6,9 @@
 
 > A **Functional Pearl**: A minimalistic Rubik's Cube solver in **under 400 lines of Python**, powered by **linear algebra**.
 
-https://github.com/user-attachments/assets/17c609ec-3adf-4eeb-b4e9-7d90617dfbfb
-
-<p align="center"><sub>Also <a href="https://youtu.be/kRrK4VJBf2s">on YouTube</a>, with chapters and captions you can switch off.</sub></p>
+<p align="center">
+  <a href="https://youtu.be/kRrK4VJBf2s"><img src="img/explainer-thumbnail.jpg" alt="The Rubik's cube is secretly linear algebra: watch the film on YouTube" width="720"></a>
+</p>
 
 Most Rubik's cube solvers rely on complex combinatorial bookkeeping: tracking 54 color stickers mapped across flat arrays, maintaining lookup tables for permutations, or precomputing massive 100MB pattern databases.
 
@@ -213,7 +213,8 @@ eigencube/
 ├── tests/
 │   ├── test_eigencube.py   # Unit test suite
 │   └── test_explainer_kit.py   # The explainer film's geometry helpers
-├── img/                # Logo, icons & the GUI's snapshot
+├── img/                # Logo, icons, the GUI's snapshot & the film's thumbnail
+│   ├── explainer-thumbnail.jpg  # YouTube's thumbnail with a play button, linking to the film
 │   ├── gui-preview.png     # Written by eigencube_gui.render_frame_to_image
 │   ├── logo.svg            # Logo; generate_logo.py also writes the icons below
 │   ├── apple-touch-icon.png
