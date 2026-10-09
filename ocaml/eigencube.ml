@@ -138,15 +138,18 @@ let single_cubelet_bfs c r is_goal =
     let res = ref None in
     while Option.is_none !res && not (Queue.is_empty q) do
       let curr_r, d = Queue.dequeue_exn q in
-      if is_goal c curr_r then res := Some d
-      else
-        for m = 0 to num_moves - 1 do
+      for m = 0 to num_moves - 1 do
+        if Option.is_none !res then begin
           let next_r = rot_matrices.(m) *@* curr_r in
-          if not (Hashtbl.mem visited next_r) then begin
-            Hashtbl.set visited ~key:next_r ~data:(d + 1);
-            Queue.enqueue q (next_r, d + 1)
-          end
-        done
+          if not (Hashtbl.mem visited next_r) then
+            begin if is_goal c next_r then res := Some (d + 1)
+            else begin
+              Hashtbl.set visited ~key:next_r ~data:(d + 1);
+              Queue.enqueue q (next_r, d + 1)
+            end
+            end
+        end
+      done
     done;
     match !res with
     | Some d -> d
@@ -263,6 +266,7 @@ let astar start is_goal heuristic random_weight max_moves =
       let cost_so_far = CubeTbl.create 8192 in
       CubeTbl.replace cost_so_far start 0;
       let simulated = ref 0 in
+      let frontier_exhausted = ref false in
       let solution = ref None in
 
       let step_move src last_move m =
@@ -292,9 +296,13 @@ let astar start is_goal heuristic random_weight max_moves =
         end
       in
 
-      while Option.is_none !solution && !simulated < budget do
+      while
+        Option.is_none !solution
+        && (not !frontier_exhausted)
+        && !simulated < budget
+      do
         match pop_heap !frontier with
-        | None -> simulated := budget
+        | None -> frontier_exhausted := true
         | Some (src, rest) ->
           frontier := rest;
           let last_move = Option.map ~f:snd (CubeTbl.find_opt came_from src) in
@@ -306,7 +314,7 @@ let astar start is_goal heuristic random_weight max_moves =
 
       match !solution with
       | Some s -> Some s
-      | None when !simulated < budget || Float.(random_weight <= 0.0) -> None
+      | None when !frontier_exhausted || Float.(random_weight <= 0.0) -> None
       | None ->
         let tm = Unix.localtime (Unix.gettimeofday ()) in
         printf
@@ -357,10 +365,10 @@ let solve_layer name total is_goal heuristic rw cube =
     | Some (next_c, mvs) ->
       log "-> found solution with %d moves" (List.length mvs);
       curr := next_c;
-      moves_acc := List.append !moves_acc mvs
+      moves_acc := mvs :: !moves_acc
     | None -> failwith ("Failed " ^ name)
   done;
-  (!curr, !moves_acc)
+  (!curr, List.concat (List.rev !moves_acc))
 
 let bottom_left_front_corner (cube : cube) =
   let target = (1, -1, -1) in
@@ -543,12 +551,12 @@ let run_tests () =
   assert (is_cube_solved !c_ref);
   printf "  [PASS] 6x Sexy Move ((R U R' U') * 6) restores identity.\n%!";
 
-  (* Test 6: Unreachable goal terminates with None (no infinite restart loop) *)
+  (* Test 6: Deterministic search terminates with None when budget is exceeded *)
   let result = astar c0 (fun _ -> false) (fun _ -> 0.0) 0.0 500 in
   assert (Option.is_none result);
   printf
-    "  [PASS] Unreachable goal terminates cleanly with None (no infinite \
-     restart).\n\
+    "  [PASS] Budget exhaustion terminates cleanly with None under \
+     deterministic search.\n\
      %!";
 
   (* Test 7: Short scramble solve round-trip *)
@@ -573,21 +581,26 @@ let run_tests () =
   printf "All OCaml invariant and solver tests passed successfully!\n%!"
 
 let main () =
+  let print_usage () =
+    printf "Usage: dune exec ocaml/eigencube.exe -- [seed | --test]\n";
+    printf
+      "  [seed]   Solves a Rubik's cube scrambled from random seed (default: 42)\n";
+    printf "  --test   Runs the complete invariant and solver test suite\n"
+  in
   let args = Sys.get_argv () in
-  if Array.length args > 1 then (
+  if Array.length args > 1 then
     match args.(1) with
-    | "--help" | "-h" ->
-      printf "Usage: dune exec ocaml/eigencube.exe -- [seed | --test]\n";
-      printf
-        "  [seed]   Solves a Rubik's cube scrambled from random seed (default: \
-         42)\n";
-      printf "  --test   Runs the complete invariant and solver test suite\n"
+    | "--help" | "-h" -> print_usage ()
     | "--test" -> run_tests ()
     | s ->
-      let seed = Int.of_string s in
+    match Int.of_string_opt s with
+    | Some seed ->
       log "Solving scrambled cube (seed=%d)..." seed;
       ignore (solve (shuffle (solved_cube ()) 100_000 seed))
-  )
+    | None ->
+      printf "Error: unrecognized option or invalid integer seed '%s'.\n\n%!" s;
+      print_usage ();
+      Stdlib.exit 1
   else begin
     log "Solving scrambled cube (seed=42)...";
     ignore (solve (shuffle (solved_cube ()) 100_000 42))
