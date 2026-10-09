@@ -60,8 +60,9 @@ let num_cubelets = Iarray.length cubelets
 let unit_vectors = List.filter all_vectors ~f:(fun v -> norm1 v = 1)
 
 let moves =
-  List.concat_map unit_vectors ~f:(fun normal ->
-      [ -1; 1 ] |> List.map ~f:(fun dir -> { normal; dir })
+  unit_vectors
+  |> List.concat_map ~f:(fun normal ->
+      [ { normal; dir = -1 }; { normal; dir = 1 } ]
   )
   |> Array.of_list
 
