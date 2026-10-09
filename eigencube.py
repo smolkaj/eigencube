@@ -63,7 +63,7 @@ assert all(v in color_names for v in unit_vectors)
 cubelet_types = ("hidden", "center", "edge", "corner")
 def describe_cubelet_type(cubelet): return cubelet_types[norm1(cubelet)]
 
-def describe_position(vector):
+def describe_vector(vector):
   x, y, z = vector
   descriptions = []
   descriptions += ["top"] if z == 1 else ["bottom"] if z == -1 else []
@@ -76,7 +76,7 @@ def describe_config(cubelet, rotation):
   colors = np.diag(cubelet)
   sticker_directions = rotation @ colors
   return ", ".join(sorted(
-     describe_position(direction) + ": " + color_names[tuple(color)]
+     describe_vector(direction) + ": " + color_names[tuple(color)]
      for color, direction in zip(colors.T, sticker_directions.T)
      if any(color)
   ))
@@ -87,7 +87,7 @@ def position(cubelet, rotation): return tuple(np.matmul(rotation, cubelet))
 def describe_cubelet(cubelet, rotation):
   return "%s %s: %s" % (
     describe_cubelet_type(cubelet),
-    describe_position(position(cubelet, rotation)),
+    describe_vector(position(cubelet, rotation)),
     describe_config(cubelet, rotation),
   )
 
@@ -98,7 +98,7 @@ def describe_move(move):
   v, direction = move
   return "%s rotation of %s slice" % (
       "clockwise" if direction == 1 else "counterclockwise",
-      describe_position(v),
+      describe_vector(v),
   )
 
 def inverse_move(move):
