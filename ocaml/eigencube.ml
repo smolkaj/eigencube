@@ -1,6 +1,6 @@
 (* eigencube.ml - Minimalistic Rubik's Cube Solver in OCaml
    A Functional Pearl: Discrete 3D Euclidean space, linear algebra,
-   chiral octahedral symmetry group, and multi-phase A* search with restarts. *)
+   and multi-phase A* search with move-budgeted restarts. *)
 
 open Base
 open Stdio
@@ -9,7 +9,9 @@ open Poly
 type vec = int * int * int
 type mat = vec * vec * vec
 type move = { normal : vec; dir : int }
-type cube = int array (* 26 cubelets mapped to rotation index 0..23 *)
+
+type cube =
+  mat array (* 26 cubelets, each mapped to its current 3x3 rotation matrix *)
 
 let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
 let dot (x1, y1, z1) (x2, y2, z2) = (x1 * x2) + (y1 * y2) + (z1 * z2)
@@ -62,88 +64,6 @@ let rot_mat { normal = x, y, _; dir } =
 
 let rot_matrices = Array.map moves ~f:rot_mat
 
-let is_cubelet_solved c r =
-  let colors = diag c in
-  r *@* colors = colors
-
-let is_cubelet_pos_solved c r = r *@ c = c
-
-(* Chiral octahedral symmetry group O (|O| = 24) *)
-let rotations, rot_indices =
-  let tbl = Hashtbl.Poly.create () and q = Queue.create () in
-  let arr = Array.create ~len:24 id3 in
-  Queue.enqueue q id3;
-  Hashtbl.set tbl ~key:id3 ~data:0;
-  let count = ref 1 in
-  while not (Queue.is_empty q) do
-    let r = Queue.dequeue_exn q in
-    Array.iter rot_matrices ~f:(fun rm ->
-        let r' = rm *@* r in
-        if not (Hashtbl.mem tbl r') then begin
-          let idx = !count in
-          Int.incr count;
-          Hashtbl.set tbl ~key:r' ~data:idx;
-          arr.(idx) <- r';
-          Queue.enqueue q r'
-        end
-    )
-  done;
-  (arr, tbl)
-
-let is_rot_solved c r = is_cubelet_solved cubelets.(c) rotations.(r)
-let is_pos_solved c r = is_cubelet_pos_solved cubelets.(c) rotations.(r)
-
-let move_rot =
-  Array.init num_moves ~f:(fun m ->
-      let rm = rot_matrices.(m) in
-      Array.init 24 ~f:(fun r ->
-          Hashtbl.find_exn rot_indices (rm *@* rotations.(r))
-      )
-  )
-
-let move_applies =
-  Array.init num_moves ~f:(fun m ->
-      let v = moves.(m).normal in
-      Array.init num_cubelets ~f:(fun c ->
-          Array.init 24 ~f:(fun r -> dot v (rotations.(r) *@ cubelets.(c)) > 0)
-      )
-  )
-
-let compute_dist is_goal =
-  Array.init num_cubelets ~f:(fun c ->
-      let dist = Array.create ~len:24 (-1) and q = Queue.create () in
-      for r = 0 to 23 do
-        if is_goal c r then begin
-          dist.(r) <- 0;
-          Queue.enqueue q r
-        end
-      done;
-      while not (Queue.is_empty q) do
-        let curr = Queue.dequeue_exn q in
-        for m = 0 to num_moves - 1 do
-          let nxt = move_rot.(m).(curr) in
-          if dist.(nxt) = -1 then begin
-            dist.(nxt) <- dist.(curr) + 1;
-            Queue.enqueue q nxt
-          end
-        done
-      done;
-      dist
-  )
-
-let dist_solved = compute_dist is_rot_solved
-let dist_pos = compute_dist is_pos_solved
-let solved_cube () : cube = Array.create ~len:num_cubelets 0
-
-let apply_move m (cube : cube) : cube =
-  let res = Array.copy cube in
-  let app = move_applies.(m) and tr = move_rot.(m) in
-  for i = 0 to num_cubelets - 1 do
-    let r = res.(i) in
-    if app.(i).(r) then res.(i) <- tr.(r)
-  done;
-  res
-
 let inv_move =
   Array.init num_moves ~f:(fun m ->
       let inv = { normal = moves.(m).normal; dir = -moves.(m).dir } in
@@ -158,55 +78,138 @@ let opposite_pruned lm m =
   && y1 = -y2
   && z1 = -z2
 
+let is_cubelet_solved c r =
+  let colors = diag c in
+  r *@* colors = colors
+
+let is_cubelet_pos_solved c r = r *@ c = c
+let solved_cube () : cube = Array.create ~len:num_cubelets id3
+
+let apply_move m (cube : cube) : cube =
+  let v = moves.(m).normal and rm = rot_matrices.(m) in
+  Array.init num_cubelets ~f:(fun i ->
+      let r = cube.(i) in
+      if dot v (r *@ cubelets.(i)) > 0 then rm *@* r else r
+  )
+
 let is_cube_solved (cube : cube) =
   let rec loop i =
-    i = num_cubelets || (dist_solved.(i).(cube.(i)) = 0 && loop (i + 1))
+    i = num_cubelets || (is_cubelet_solved cubelets.(i) cube.(i) && loop (i + 1))
   in
   loop 0
 
-(* Heuristics (L0.5 norm) *)
-let top_layer_heuristic cube =
+let hash_mat ((a, b, c), (d, e, f), (g, h, i)) =
+  a
+  + (3 * b)
+  + (9 * c)
+  + (27 * d)
+  + (81 * e)
+  + (243 * f)
+  + (729 * g)
+  + (2187 * h)
+  + (6561 * i)
+
+let hash_cube (arr : cube) =
+  let h = ref 17 in
+  for i = 0 to num_cubelets - 1 do
+    h := (!h * 31) + hash_mat arr.(i)
+  done;
+  !h
+
+module CubeTbl = Stdlib.Hashtbl.Make (struct
+  type t = cube
+
+  let equal = Poly.equal
+  let hash = hash_cube
+end)
+
+(* Lazy distance heuristics *)
+let dist_solved_cache = Hashtbl.Poly.create ()
+let dist_pos_cache = Hashtbl.Poly.create ()
+
+let single_cubelet_bfs c r is_goal =
+  if is_goal c r then 0
+  else
+    let q = Queue.create () in
+    let visited = Hashtbl.Poly.create () in
+    Queue.enqueue q (r, 0);
+    Hashtbl.set visited ~key:r ~data:0;
+    let res = ref None in
+    while Option.is_none !res && not (Queue.is_empty q) do
+      let curr_r, d = Queue.dequeue_exn q in
+      if is_goal c curr_r then res := Some d
+      else
+        for m = 0 to num_moves - 1 do
+          let next_r = rot_matrices.(m) *@* curr_r in
+          if not (Hashtbl.mem visited next_r) then begin
+            Hashtbl.set visited ~key:next_r ~data:(d + 1);
+            Queue.enqueue q (next_r, d + 1)
+          end
+        done
+    done;
+    match !res with
+    | Some d -> d
+    | None -> 0
+
+let min_moves_to_solved c r =
+  Hashtbl.find_or_add dist_solved_cache (c, r) ~default:(fun () ->
+      single_cubelet_bfs c r is_cubelet_solved
+  )
+
+let min_moves_to_pos c r =
+  Hashtbl.find_or_add dist_pos_cache (c, r) ~default:(fun () ->
+      single_cubelet_bfs c r is_cubelet_pos_solved
+  )
+
+let top_layer_heuristic (cube : cube) =
   let p = 0.5 and sum = ref 0.0 in
   for i = 0 to num_cubelets - 1 do
     let _, _, z = cubelets.(i) in
-    if z = 1 then sum := !sum +. (Float.of_int dist_solved.(i).(cube.(i)) **. p)
+    if z = 1 then
+      let d = min_moves_to_solved cubelets.(i) cube.(i) in
+      sum := !sum +. (Float.of_int d **. p)
   done;
   (!sum **. (1.0 /. p)) /. 8.0
 
-let middle_layer_heuristic cube =
+let middle_layer_heuristic (cube : cube) =
   let p = 0.5 and sum = ref 0.0 in
   for i = 0 to num_cubelets - 1 do
     let _, _, z = cubelets.(i) in
-    if z >= 0 then sum := !sum +. (Float.of_int dist_solved.(i).(cube.(i)) **. p)
+    if z >= 0 then
+      let d = min_moves_to_solved cubelets.(i) cube.(i) in
+      sum := !sum +. (Float.of_int d **. p)
   done;
   (!sum **. (1.0 /. p)) /. 4.0
 
-let bottom_layer_edge_heuristic cube =
+let bottom_layer_edge_heuristic (cube : cube) =
   let p = 0.5 and sum = ref 0.0 in
   for i = 0 to num_cubelets - 1 do
     let c = cubelets.(i) in
     let _, _, z = c in
     if not (z = -1 && norm1 c = 3) then
-      sum := !sum +. (Float.of_int dist_solved.(i).(cube.(i)) **. p)
+      let d = min_moves_to_solved c cube.(i) in
+      sum := !sum +. (Float.of_int d **. p)
   done;
   (!sum **. (1.0 /. p)) /. 3.0
 
-let bottom_layer_corner_heuristic cube =
+let bottom_layer_corner_heuristic (cube : cube) =
   let p = 0.5 and s1 = ref 0.0 and s2 = ref 0.0 and s3 = ref 0.0 in
   for i = 0 to num_cubelets - 1 do
     let c = cubelets.(i) and r = cube.(i) in
     let _, _, z = c in
-    if z = 1 then s1 := !s1 +. (Float.of_int dist_solved.(i).(r) **. p)
-    else if z = 0 then s2 := !s2 +. (Float.of_int dist_solved.(i).(r) **. p)
+    if z = 1 then s1 := !s1 +. (Float.of_int (min_moves_to_solved c r) **. p)
+    else if z = 0 then
+      s2 := !s2 +. (Float.of_int (min_moves_to_solved c r) **. p)
     else if z = -1 then
-      let d = if norm1 c = 3 then dist_pos.(i).(r) else dist_solved.(i).(r) in
+      let d =
+        if norm1 c = 3 then min_moves_to_pos c r else min_moves_to_solved c r
+      in
       s3 := !s3 +. (Float.of_int d **. p)
   done;
   ((!s1 **. (1.0 /. p)) /. 5.0)
   +. ((!s2 **. (1.0 /. p)) /. 3.0)
   +. ((!s3 **. (1.0 /. p)) /. 8.0)
 
-(* Pairing heap for A* priority queue *)
 type 'a heap = Empty | Node of float * 'a * 'a heap list
 
 let empty_heap = Empty
@@ -237,107 +240,106 @@ let random_gauss mean std =
 
 let total_moves_simulated = ref 0
 
+let reconstruct came_from dst =
+  let rec loop curr acc =
+    match CubeTbl.find_opt came_from curr with
+    | Some (p, mv) -> loop p (mv :: acc)
+    | None -> acc
+  in
+  (dst, loop dst [])
+
+let should_prune last_move m =
+  match last_move with
+  | None -> false
+  | Some lm -> m = inv_move.(lm) || opposite_pruned lm m
+
 let astar start is_goal heuristic random_weight max_moves =
   if is_goal start then Some (start, [])
   else
     let rec attempt budget =
       let frontier = ref (push_heap empty_heap 0.0 start) in
-      let came_from = Hashtbl.Poly.create ()
-      and cost_so_far = Hashtbl.Poly.create () in
-      Hashtbl.set cost_so_far ~key:start ~data:0;
-      let simulated = ref 0
-      and budget_exceeded = ref false
-      and active = ref true
-      and solution = ref None in
-      while Option.is_none !solution && (not !budget_exceeded) && !active do
+      let came_from = CubeTbl.create 8192 in
+      let cost_so_far = CubeTbl.create 8192 in
+      CubeTbl.replace cost_so_far start 0;
+      let simulated = ref 0 in
+      let solution = ref None in
+
+      let step_move src last_move m =
+        if not (should_prune last_move m) then begin
+          Int.incr simulated;
+          Int.incr total_moves_simulated;
+          let dst = apply_move m src in
+          let cost = CubeTbl.find cost_so_far src + 1 in
+          let dominated =
+            match CubeTbl.find_opt cost_so_far dst with
+            | Some c -> c <= cost
+            | None -> false
+          in
+          if not dominated then begin
+            CubeTbl.replace cost_so_far dst cost;
+            CubeTbl.replace came_from dst (src, m);
+            if is_goal dst then solution := Some (reconstruct came_from dst)
+            else if !simulated < budget then
+              let hw =
+                if Float.(random_weight > 0.0) then
+                  Float.max 0.01 (random_gauss 1.0 random_weight)
+                else 1.0
+              in
+              let prio = Float.of_int cost +. (hw *. heuristic dst) in
+              frontier := push_heap !frontier prio dst
+          end
+        end
+      in
+
+      while Option.is_none !solution && !simulated < budget do
         match pop_heap !frontier with
-        | None -> active := false
+        | None -> simulated := budget
         | Some (src, rest) ->
           frontier := rest;
-          let last_m =
-            match Hashtbl.find came_from src with
-            | Some (_, m) -> Some m
-            | None -> None
-          in
+          let last_move = Option.map ~f:snd (CubeTbl.find_opt came_from src) in
           for m = 0 to num_moves - 1 do
-            if Option.is_none !solution && not !budget_exceeded then begin
-              let skip =
-                match last_m with
-                | Some lm -> m = inv_move.(lm) || opposite_pruned lm m
-                | None -> false
-              in
-              if not skip then begin
-                let dst = apply_move m src in
-                Int.incr simulated;
-                Int.incr total_moves_simulated;
-                let cost = Hashtbl.find_exn cost_so_far src + 1 in
-                if !simulated >= budget then budget_exceeded := true;
-                match Hashtbl.find cost_so_far dst with
-                | Some c when c <= cost -> ()
-                | _ ->
-                  Hashtbl.set cost_so_far ~key:dst ~data:cost;
-                  Hashtbl.set came_from ~key:dst ~data:(src, m);
-                  if is_goal dst then begin
-                    let rec unwind curr acc =
-                      match Hashtbl.find came_from curr with
-                      | Some (p, mv) -> unwind p (mv :: acc)
-                      | None -> acc
-                    in
-                    solution := Some (dst, unwind dst [])
-                  end
-                  else if not !budget_exceeded then begin
-                    let hw =
-                      if Float.(random_weight > 0.0) then
-                        Float.max 0.01 (random_gauss 1.0 random_weight)
-                      else 1.0
-                    in
-                    frontier :=
-                      push_heap !frontier
-                        (Float.of_int cost +. (hw *. heuristic dst))
-                        dst
-                  end
-              end
-            end
+            if Option.is_none !solution && !simulated < budget then
+              step_move src last_move m
           done
       done;
+
       match !solution with
       | Some s -> Some s
+      | None when !simulated < budget || Float.(random_weight <= 0.0) -> None
       | None ->
-        if (not !budget_exceeded) || Float.(random_weight <= 0.0) then None
-        else begin
-          let tm = Unix.localtime (Unix.gettimeofday ()) in
-          printf
-            "[%02d:%02d:%02d] search budget of %d moves exceeded; restarting\n\
-             %!"
-            tm.tm_hour tm.tm_min tm.tm_sec budget;
-          attempt (Float.to_int (Float.of_int budget *. 1.5))
-        end
+        let tm = Unix.localtime (Unix.gettimeofday ()) in
+        printf
+          "[%02d:%02d:%02d] search budget of %d moves exceeded; restarting\n%!"
+          tm.tm_hour tm.tm_min tm.tm_sec budget;
+        attempt (Float.to_int (Float.of_int budget *. 1.5))
     in
     attempt max_moves
 
-let count_solved pred cube =
+let count_solved pred (cube : cube) =
   let cnt = ref 0 in
   for i = 0 to num_cubelets - 1 do
-    if pred cubelets.(i) && dist_solved.(i).(cube.(i)) = 0 then Int.incr cnt
+    if pred cubelets.(i) && is_cubelet_solved cubelets.(i) cube.(i) then
+      Int.incr cnt
   done;
   !cnt
 
-let count_bottom_edges_positioned cube =
+let count_bottom_edges_positioned (cube : cube) =
   let cnt = ref 0 in
   for i = 0 to num_cubelets - 1 do
     let c = cubelets.(i) in
     let _, _, z = c in
     if z = -1 && norm1 c = 2 then
-      if rotations.(cube.(i)) *@ (0, 0, -1) = (0, 0, -1) then Int.incr cnt
+      if cube.(i) *@ (0, 0, -1) = (0, 0, -1) then Int.incr cnt
   done;
   !cnt
 
-let count_bottom_corners_positioned cube =
+let count_bottom_corners_positioned (cube : cube) =
   let cnt = ref 0 in
   for i = 0 to num_cubelets - 1 do
     let c = cubelets.(i) in
     let _, _, z = c in
-    if z = -1 && norm1 c = 3 && dist_pos.(i).(cube.(i)) = 0 then Int.incr cnt
+    if z = -1 && norm1 c = 3 && is_cubelet_pos_solved c cube.(i) then
+      Int.incr cnt
   done;
   !cnt
 
@@ -359,11 +361,11 @@ let solve_layer name total is_goal heuristic rw cube =
   done;
   (!curr, !moves_acc)
 
-let bottom_left_front_corner cube =
+let bottom_left_front_corner (cube : cube) =
   let target = (1, -1, -1) in
   let rec find i =
     if i = num_cubelets then failwith "Corner missing"
-    else if rotations.(cube.(i)) *@ cubelets.(i) = target then (i, cube.(i))
+    else if cube.(i) *@ cubelets.(i) = target then (i, cube.(i))
     else find (i + 1)
   in
   find 0
@@ -374,7 +376,7 @@ let find_move n d =
   in
   loop 0
 
-let solve_endgame cube =
+let solve_endgame (cube : cube) =
   let curr = ref cube and sol = ref [] in
   let left = find_move (0, -1, 0) 1 in
   let top = find_move (0, 0, 1) 1 in
@@ -396,11 +398,11 @@ let solve_endgame cube =
     curr := apply_move m !curr
   in
   let is_corner_oriented () =
-    let c_idx, r_idx = bottom_left_front_corner !curr in
-    let rot = ref r_idx and solved = ref false in
+    let c_idx, r = bottom_left_front_corner !curr in
+    let rot = ref r and solved = ref false in
     for _ = 0 to 3 do
-      if dist_solved.(c_idx).(!rot) = 0 then solved := true;
-      rot := move_rot.(bottom).(!rot)
+      if is_cubelet_solved cubelets.(c_idx) !rot then solved := true;
+      rot := rot_matrices.(bottom) *@* !rot
     done;
     !solved
   in
@@ -423,7 +425,7 @@ let shuffle cube iters seed =
   done;
   !curr
 
-let solve cube =
+let solve (cube : cube) =
   let t0 = Unix.gettimeofday () in
   let start_sim = !total_moves_simulated in
   let c1, s1 =
