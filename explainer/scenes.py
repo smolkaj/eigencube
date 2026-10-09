@@ -879,9 +879,9 @@ class Configuration(Narrated):
         with self.voice("One, minus one, one. Front, left, top: exactly where the corner went."):
             self.play(Indicate(p_eq[1][-1], color=POSITION), Indicate(moved, color=POSITION))
 
-        turned_stickers = quarter @ np.diag(CORNER)
+        sticker_directions = quarter @ np.diag(CORNER)
         s_eq = self.hud(VGroup(MathTex(r"R\,\mathrm{diag}(c) =", font_size=36),
-                               matrix_tex(turned_stickers, BASIS_COLORS).scale(0.7))
+                               matrix_tex(sticker_directions, BASIS_COLORS).scale(0.7))
                         .arrange(RIGHT).move_to(p_eq, aligned_edge=LEFT))
         with self.voice("And where do its stickers point? Same idea: apply the matrix R to diag of c. "
                         "Matrix multiplication works column by column, so this rotates every "
