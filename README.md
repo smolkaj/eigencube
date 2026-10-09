@@ -8,6 +8,8 @@
 
 https://github.com/user-attachments/assets/17c609ec-3adf-4eeb-b4e9-7d90617dfbfb
 
+<p align="center"><sub>Also <a href="https://youtu.be/kRrK4VJBf2s">on YouTube</a>, with chapters and captions you can switch off.</sub></p>
+
 Most Rubik's cube solvers rely on complex combinatorial bookkeeping: tracking 54 color stickers mapped across flat arrays, maintaining lookup tables for permutations, or precomputing massive 100MB pattern databases.
 
 **Eigencube takes a different path.** By framing the puzzle in discrete 3-dimensional Euclidean space using linear algebra, the entire physics, state, and solution of the Rubik's Cube reduce to **vectors, rotation matrices, and dot products**.
