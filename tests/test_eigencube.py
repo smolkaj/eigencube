@@ -131,11 +131,11 @@ class TestEigencube(unittest.TestCase):
         self.assertFalse(is_cube_solved(cube_a))
 
     def test_descriptions(self):
-        """Verify describe_position, describe_move, and describe_cubelet_type."""
-        from eigencube import describe_position, describe_move, describe_cubelet_type
-        self.assertEqual(describe_position((1, 0, 0)), "front")
-        self.assertEqual(describe_position((0, 1, 1)), "top-right")
-        self.assertEqual(describe_position((-1, -1, -1)), "bottom-left-back")
+        """Verify describe_vector, describe_move, and describe_cubelet_type."""
+        from eigencube import describe_vector, describe_move, describe_cubelet_type
+        self.assertEqual(describe_vector((1, 0, 0)), "front")
+        self.assertEqual(describe_vector((0, 1, 1)), "top-right")
+        self.assertEqual(describe_vector((-1, -1, -1)), "bottom-left-back")
         self.assertEqual(describe_cubelet_type((0, 0, 1)), "center")
         self.assertEqual(describe_cubelet_type((1, 1, 0)), "edge")
         self.assertEqual(describe_cubelet_type((1, 1, 1)), "corner")

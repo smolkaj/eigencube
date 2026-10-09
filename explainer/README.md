@@ -15,7 +15,7 @@ The rendered film (1080p, ~35 MB, English captions embedded) is a build artifact
 | `FixedFrame` | The rigid cross never moves (each arm is an eigenvector of the turns around it), so it *is* the coordinate frame |
 | `CountingStickers` | Coordinates of 0 mean inside, ±1 mean surface; the 1-norm of c counts stickers |
 | `ColorsAreVectors` | The six colors are ±e<sub>x</sub>, ±e<sub>y</sub>, ±e<sub>z</sub> |
-| `DiagTrick` | diag(c) packs a cubelet's sticker directions, which are its colors, into matrix columns |
+| `DiagTrick` | diag(c) packs which way a cubelet's stickers face, and their colors, into matrix columns |
 | `Configuration` | A cubelet's configuration (c, R) is its entire state |
 | `Moves` | A move is one dot product to select and one matrix product to turn |
 | `Solved` | R diag(c) = diag(c), exactly as picky as the colors are |
