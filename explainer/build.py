@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -43,15 +42,11 @@ def render(scene, flags, media):
         sys.exit(f"{scene} failed to render; see {log}")
 
 
-# How the film's picture is compressed, for the clean cut and the captioned one alike.
-PICTURE_CODEC = ["-c:v", "libx264", "-crf", "28", "-preset", "slow", "-tune", "animation",
-                 "-pix_fmt", "yuv420p"]
-
-
 def encode(video, encoded):
     """A chapter's picture as it goes into the film. Encoded chapter by chapter, as each finishes
     rendering and in parallel with the others, the film's picture is then a plain join."""
-    ffmpeg_to(encoded, ["-i", str(video), "-map", "0:v", *PICTURE_CODEC])
+    ffmpeg_to(encoded, ["-i", str(video), "-map", "0:v", "-c:v", "libx264", "-crf", "28",
+                        "-preset", "slow", "-tune", "animation", "-pix_fmt", "yuv420p"])
 
 
 def fingerprint(scene, flags):
@@ -207,41 +202,11 @@ def check_av_lengths(film):
         sys.exit(f"audio ({lengths['audio']}s) and video ({lengths['video']}s) differ in length")
 
 
-def burn_in_captions(film, videos, soundtrack, subtitles, media):
-    """The film with its captions drawn into the picture, for players that can't show a caption
-    track (such as GitHub's). They sit in the band the film keeps free for them (kit.CAPTION_TOP).
-    Made from the chapters as rendered, not from the encoded film, so it is compressed once."""
-    # Sizes are in units of a 288-pixel-high frame, which libass scales to the video.
-    # On a translucent box (BorderStyle 4, padded by Outline), so they read over grid lines too;
-    # sized for phones as well.
-    style = ("FontName=DejaVu Sans,FontSize=14,PrimaryColour=&H00FFFFFF,BorderStyle=4,"
-             "BackColour=&H30000000,Outline=0.8,Shadow=0,MarginV=10")
-    recipe = ["-f", "concat", "-safe", "0", "-i", concat_list(media, "chapters.txt", videos),
-              "-i", str(soundtrack), "-map", "0:v", "-map", "1:a",
-              # By name, from its own folder: a full path would need filtergraph escaping.
-              "-vf", f"subtitles={subtitles.name}:force_style='{style}'",
-              *PICTURE_CODEC, "-c:a", "copy", "-movflags", "+faststart"]
-    # Keyed by everything it is made from: the recipe, the captions, and the chapters (by their
-    # fingerprints, which name what each is made from). Only the latest one stays.
-    key = hashlib.sha1("\0".join([*recipe, subtitles.read_text(), *(
-        (media / "fingerprints" / v.stem).read_text() for v in videos)]).encode())
-    made = media / "captioned" / f"{key.hexdigest()}.mp4"
-    if not made.exists():
-        shutil.rmtree(made.parent, ignore_errors=True)
-        made.parent.mkdir()
-        ffmpeg_to(made, recipe, cwd=subtitles.parent)
-    captioned = film.with_name(film.stem + "-captioned.mp4")
-    shutil.copyfile(made, captioned)
-    check_av_lengths(captioned)
-    if abs(duration(captioned) - duration(film)) > 0.1:
-        sys.exit(f"{captioned} runs {duration(captioned):.2f}s, the film {duration(film):.2f}s")
-
-
-def ffmpeg_to(path, args, cwd=None):
+def ffmpeg_to(path, args):
     """Runs ffmpeg into `path`, which only appears once ffmpeg has finished: an interrupted run
     could otherwise leave a short but valid file that later builds reuse as finished."""
     partial = path.with_name(f"{path.stem}.partial{path.suffix}")
-    subprocess.run(["ffmpeg", "-v", "error", "-y", *args, str(partial)], check=True, cwd=cwd)
+    subprocess.run(["ffmpeg", "-v", "error", "-y", *args, str(partial)], check=True)
     partial.replace(path)
 
 
@@ -334,7 +299,6 @@ def main():
     check_av_lengths(film)
     if not args.draft:  # The committed contact sheet tracks the latest final cut.
         contact_sheet(film, videos, media)
-        burn_in_captions(film, videos, soundtrack, subtitles, media)
     print(f"{film}  ({duration(film) / 60:.1f} min)")
 
 
