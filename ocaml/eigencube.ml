@@ -136,19 +136,33 @@ let min_moves_to_pos c r =
       single_cubelet_bfs c r is_cubelet_pos_solved
   )
 
-let fold2 a b ~init ~f =
-  let len = Iarray.length a in
-  let rec loop i acc =
-    if i = len then acc else loop (i + 1) (f acc a.%(i) b.%(i))
-  in
-  loop 0 init
+let top_cubelets =
+  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
+      if z = 1 then Some (i, c) else None
+  )
+
+let middle_belt_cubelets =
+  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
+      if z = 0 then Some (i, c) else None
+  )
+
+let middle_cubelets = top_cubelets @ middle_belt_cubelets
+
+let bottom_edges =
+  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
+      if not (z = -1 && norm1 c = 3) then Some (i, c) else None
+  )
+
+let bottom_cubelets =
+  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
+      if z = -1 then Some (i, c) else None
+  )
 
 let top_layer_heuristic cube =
   let p = 0.5 in
   let sum =
-    fold2 cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
-        if z = 1 then acc +. (Float.of_int (min_moves_to_solved c r) **. p)
-        else acc
+    List.fold top_cubelets ~init:0.0 ~f:(fun acc (i, c) ->
+        acc +. (Float.of_int (min_moves_to_solved c cube.%(i)) **. p)
     )
   in
   (sum **. (1.0 /. p)) /. 8.0
@@ -156,9 +170,8 @@ let top_layer_heuristic cube =
 let middle_layer_heuristic cube =
   let p = 0.5 in
   let sum =
-    fold2 cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
-        if z >= 0 then acc +. (Float.of_int (min_moves_to_solved c r) **. p)
-        else acc
+    List.fold middle_cubelets ~init:0.0 ~f:(fun acc (i, c) ->
+        acc +. (Float.of_int (min_moves_to_solved c cube.%(i)) **. p)
     )
   in
   (sum **. (1.0 /. p)) /. 4.0
@@ -166,30 +179,28 @@ let middle_layer_heuristic cube =
 let bottom_layer_edge_heuristic cube =
   let p = 0.5 in
   let sum =
-    fold2 cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
-        if not (z = -1 && norm1 c = 3) then
-          acc +. (Float.of_int (min_moves_to_solved c r) **. p)
-        else acc
+    List.fold bottom_edges ~init:0.0 ~f:(fun acc (i, c) ->
+        acc +. (Float.of_int (min_moves_to_solved c cube.%(i)) **. p)
     )
   in
   (sum **. (1.0 /. p)) /. 3.0
 
 let bottom_layer_corner_heuristic cube =
   let p = 0.5 in
-  let s1, s2, s3 =
-    fold2 cubelets cube ~init:(0.0, 0.0, 0.0)
-      ~f:(fun (s1, s2, s3) ((_, _, z) as c) r ->
-        if z = 1 then
-          (s1 +. (Float.of_int (min_moves_to_solved c r) **. p), s2, s3)
-        else if z = 0 then
-          (s1, s2 +. (Float.of_int (min_moves_to_solved c r) **. p), s3)
-        else if z = -1 then
-          let d =
-            if norm1 c = 3 then min_moves_to_pos c r
-            else min_moves_to_solved c r
-          in
-          (s1, s2, s3 +. (Float.of_int d **. p))
-        else (s1, s2, s3)
+  let sum_moves group =
+    List.fold group ~init:0.0 ~f:(fun acc (i, c) ->
+        acc +. (Float.of_int (min_moves_to_solved c cube.%(i)) **. p)
+    )
+  in
+  let s1 = sum_moves top_cubelets in
+  let s2 = sum_moves middle_belt_cubelets in
+  let s3 =
+    List.fold bottom_cubelets ~init:0.0 ~f:(fun acc (i, c) ->
+        let d =
+          if norm1 c = 3 then min_moves_to_pos c cube.%(i)
+          else min_moves_to_solved c cube.%(i)
+        in
+        acc +. (Float.of_int d **. p)
     )
   in
   ((s1 **. (1.0 /. p)) /. 5.0)
