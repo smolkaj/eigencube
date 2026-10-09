@@ -42,8 +42,8 @@ let test_inverse_cancellation () =
 
 (* Test 4: 6x Sexy Move identity (R U R' U') * 6 = Identity *)
 let test_sexy_move_cycle () =
-  let r = Rubix.find_move { x = 0; y = 1; z = 0 } 1 in
-  let u = Rubix.find_move { x = 0; y = 0; z = 1 } 1 in
+  let r = Rubix.find_move (0, 1, 0) 1 in
+  let u = Rubix.find_move (0, 0, 1) 1 in
   let r_inv = Rubix.inv_move.(r) in
   let u_inv = Rubix.inv_move.(u) in
   let sexy = [ r; u; r_inv; u_inv ] in
@@ -64,7 +64,18 @@ let test_unreachable_goal () =
      restart).\n\
      %!"
 
-(* Test 6: Short scramble solve round-trip *)
+(* Test 6: Linear algebra and R * diag(c) = diag(c) invariant *)
+let test_linear_algebra_invariants () =
+  let c = (1, 1, 1) in
+  assert (Rubix.is_cubelet_solved c Rubix.id3);
+  let rot_x = Rubix.rot_matrices.(0) in
+  assert (not (Rubix.is_cubelet_solved c rot_x));
+  assert (Rubix.dot (1, 0, 0) (0, 1, 0) = 0);
+  assert (Rubix.dot (1, 2, 3) (4, 5, 6) = 32);
+  printf
+    "  [PASS] Linear algebra and R * diag(c) = diag(c) invariant verified.\n%!"
+
+(* Test 7: Short scramble solve round-trip *)
 let test_solve_roundtrip () =
   let scrambled = Rubix.shuffle (Rubix.solved_cube ()) 10 999 in
   assert (not (Rubix.is_cube_solved scrambled));
@@ -76,6 +87,7 @@ let test_solve_roundtrip () =
 
 let () =
   test_cubelet_invariants ();
+  test_linear_algebra_invariants ();
   test_four_turn_identity ();
   test_inverse_cancellation ();
   test_sexy_move_cycle ();
