@@ -10,8 +10,8 @@ type vec = int * int * int
 type mat = vec * vec * vec
 type move = { normal : vec; dir : int }
 
-type cube =
-  mat array (* 26 cubelets, each mapped to its current 3x3 rotation matrix *)
+(* 26 cubelets, each mapped to its current 3x3 rotation matrix *)
+type cube = mat array
 
 let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
 let dot (x1, y1, z1) (x2, y2, z2) = (x1 * x2) + (y1 * y2) + (z1 * z2)
@@ -71,6 +71,7 @@ let inv_move =
       find 0
   )
 
+(* Opposite face moves commute; prune duplicate branches by enforcing canonical order *)
 let opposite_pruned lm m =
   let x1, y1, z1 = moves.(lm).normal and x2, y2, z2 = moves.(m).normal in
   (x1 > x2 || (x1 = x2 && (y1 > y2 || (y1 = y2 && z1 > z2))))
@@ -214,6 +215,7 @@ let bottom_layer_corner_heuristic (cube : cube) =
   +. ((!s2 **. (1.0 /. p)) /. 3.0)
   +. ((!s3 **. (1.0 /. p)) /. 8.0)
 
+(* Functional pairing heap priority queue *)
 type 'a heap = Empty | Node of float * 'a * 'a heap list
 
 let empty_heap = Empty
@@ -257,6 +259,7 @@ let should_prune last_move m =
   | None -> false
   | Some lm -> m = inv_move.(lm) || opposite_pruned lm m
 
+(* Multi-phase A* search with move-budgeted restarts (1.5x expansion) *)
 let astar start is_goal heuristic random_weight max_moves =
   if is_goal start then Some (start, [])
   else
@@ -385,6 +388,7 @@ let find_move n d =
   in
   loop 0
 
+(* Endgame: orient bottom corners using (R' D' R D) * 2/4 and align bottom face *)
 let solve_endgame (cube : cube) =
   let curr = ref cube and sol = ref [] in
   let left = find_move (0, -1, 0) 1 in
@@ -434,6 +438,7 @@ let shuffle cube iters seed =
   done;
   !curr
 
+(* Full 3-phase human solver: top layer -> middle edges -> bottom layer & endgame *)
 let solve (cube : cube) =
   let t0 = Unix.gettimeofday () in
   let start_sim = !total_moves_simulated in
