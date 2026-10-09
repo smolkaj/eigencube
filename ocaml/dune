@@ -1,7 +1,9 @@
 (executable
  (name eigencube)
  (public_name eigencube)
- (libraries base stdio unix))
+ (libraries base stdio unix)
+ (preprocess
+  (pps ppx_jane)))
 
 (rule
  (alias runtest)

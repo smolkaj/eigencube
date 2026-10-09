@@ -6,12 +6,19 @@ open Base
 open Stdio
 open Poly
 
-type vec = int * int * int
-type mat = vec * vec * vec
-type move = { normal : vec; dir : int }
+type vec = int * int * int [@@deriving compare, hash, sexp]
+type mat = vec * vec * vec [@@deriving compare, hash, sexp]
+type move = { normal : vec; dir : int } [@@deriving compare, sexp]
+
+let hash_fold_array f state arr =
+  Array.fold arr ~init:state ~f:(fun s x -> f s x)
 
 (* 26 cubelets, each mapped to its current 3x3 rotation matrix *)
-type cube = mat array
+module Cube = struct
+  type t = mat array [@@deriving compare, hash, sexp]
+end
+
+type cube = Cube.t
 
 let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
 let dot (x1, y1, z1) (x2, y2, z2) = (x1 * x2) + (y1 * y2) + (z1 * z2)
@@ -95,20 +102,6 @@ let apply_move m (cube : cube) : cube =
 
 let is_cube_solved (cube : cube) =
   Array.for_all2_exn cubelets cube ~f:is_cubelet_solved
-
-(* Specialized 26-cubelet full-depth hash key for Base.Hashtbl *)
-let cube_key =
-  Hashable.to_key
-    {
-      hash =
-        (fun cube ->
-          Array.fold cube ~init:17 ~f:(fun acc m ->
-              (acc * 31) + Stdlib.Hashtbl.hash m
-          )
-        );
-      compare = Poly.compare;
-      sexp_of_t = (fun _ -> Sexp.Atom "cube");
-    }
 
 let single_cubelet_bfs c r is_goal =
   if is_goal c r then 0
@@ -251,8 +244,8 @@ let astar start is_goal heuristic random_weight max_moves =
   else
     let rec attempt budget =
       let frontier = ref (push_heap empty_heap 0.0 start) in
-      let came_from = Hashtbl.create cube_key ~size:8192 in
-      let cost_so_far = Hashtbl.create cube_key ~size:8192 in
+      let came_from = Hashtbl.create (module Cube) ~size:8192 in
+      let cost_so_far = Hashtbl.create (module Cube) ~size:8192 in
       Hashtbl.set cost_so_far ~key:start ~data:0;
       let simulated = ref 0 in
       let frontier_exhausted = ref false in
