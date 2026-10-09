@@ -214,7 +214,7 @@ eigencube/
 │   ├── test_eigencube.py   # Unit test suite
 │   └── test_explainer_kit.py   # The explainer film's geometry helpers
 ├── img/                # Logo, icons, the GUI's snapshot & the film's thumbnail
-│   ├── explainer-thumbnail.jpg  # YouTube's thumbnail with a play button, linking to the film
+│   ├── explainer-thumbnail.jpg  # YouTube's thumbnail with a centered play button, linking to the film
 │   ├── gui-preview.png     # Written by eigencube_gui.render_frame_to_image
 │   ├── logo.svg            # Logo; generate_logo.py also writes the icons below
 │   ├── apple-touch-icon.png
