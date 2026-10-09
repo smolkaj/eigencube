@@ -129,7 +129,12 @@ let should_prune last_move move =
     move = inv_move.(prev)
     ||
     let n1 = moves.(prev).normal and n2 = moves.(move).normal in
-    dot n1 n2 = -1 && Poly.(n1 > n2)
+    dot n1 n2 = -1 && n1 > n2
+
+let log fmt =
+  let tm = Unix.localtime (Unix.gettimeofday ()) in
+  printf "[%02d:%02d:%02d] " tm.tm_hour tm.tm_min tm.tm_sec;
+  printf (Stdlib.( ^^ ) fmt "\n%!")
 
 (* Multi-phase A* search with move-budgeted restarts (1.5x expansion) *)
 let astar (type state) ~(start : state) ~(is_goal : state -> bool)
@@ -186,12 +191,11 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
           if next_simulated >= budget then
             if Float.(random_weight <= 0.0) then None
             else begin
-              let tm = Unix.localtime (Unix.gettimeofday ()) in
-              printf
-                "[%02d:%02d:%02d] search budget of %d moves exceeded; restarting\n\
-                 %!"
-                tm.tm_hour tm.tm_min tm.tm_sec budget;
-              attempt (Float.to_int (Float.of_int budget *. 1.5))
+              log "search budget of %d moves exceeded; restarting" budget;
+              attempt
+                (Int.max (budget + 1)
+                   (Float.to_int (Float.of_int budget *. 1.5))
+                )
             end
           else search next_frontier next_simulated
       )
@@ -310,11 +314,6 @@ let count_bottom_corners_positioned cube =
       z = -1 && norm1 c = 3 && is_cubelet_pos_solved c r
     )
     cube
-
-let log fmt =
-  let tm = Unix.localtime (Unix.gettimeofday ()) in
-  printf "[%02d:%02d:%02d] " tm.tm_hour tm.tm_min tm.tm_sec;
-  printf (Stdlib.( ^^ ) fmt "\n%!")
 
 let solve_layer ~name ~total ~is_goal ~heuristic ~random_weight cube =
   let rec loop i curr moves_acc =
