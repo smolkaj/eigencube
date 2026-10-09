@@ -13,10 +13,13 @@ type move = { normal : vec; dir : int } [@@deriving compare, sexp]
 module Iarray = struct
   include Stdlib.Iarray
 
+  let ( .%() ) = get
   let hash_fold_t f state arr = fold_left (fun s x -> f s x) state arr
   let sexp_of_t sexp_of_x arr = sexp_of_array sexp_of_x (to_array arr)
   let t_of_sexp x_of_sexp sexp = of_array (array_of_sexp x_of_sexp sexp)
 end
+
+let ( .%() ) = Iarray.get
 
 (* 26 cubelets, each mapped to its current 3x3 rotation matrix *)
 module Cube = struct
@@ -93,31 +96,30 @@ let solved_cube : Cube.t = Iarray.init num_cubelets (fun _ -> id3)
 let apply_move m cube : Cube.t =
   let v = moves.(m).normal and rm = rot_matrices.(m) in
   Iarray.init num_cubelets (fun i ->
-      let r = Iarray.get cube i in
-      if dot v (r *@ Iarray.get cubelets i) > 0 then rm *@* r else r
+      let r = cube.%(i) in
+      if dot v (r *@ cubelets.%(i)) > 0 then rm *@* r else r
   )
 
 let single_cubelet_bfs c r is_goal =
-  if is_goal c r then 0
-  else
-    With_return.with_return (fun r_ret ->
-        let q = Queue.create () in
-        let visited = Hashtbl.Poly.create () in
-        Queue.enqueue q (r, 0);
-        Hashtbl.set visited ~key:r ~data:0;
-        while not (Queue.is_empty q) do
-          let curr_r, d = Queue.dequeue_exn q in
-          Array.iter rot_matrices ~f:(fun rm ->
-              let next_r = rm *@* curr_r in
-              if not (Hashtbl.mem visited next_r) then begin
-                if is_goal c next_r then r_ret.return (d + 1);
-                Hashtbl.set visited ~key:next_r ~data:(d + 1);
-                Queue.enqueue q (next_r, d + 1)
-              end
-          )
-        done;
-        0
-    )
+  With_return.with_return (fun { return } ->
+      if is_goal c r then return 0;
+      let q = Queue.create () in
+      let visited = Hashtbl.Poly.create () in
+      Queue.enqueue q (r, 0);
+      Hashtbl.set visited ~key:r ~data:();
+      while not (Queue.is_empty q) do
+        let curr, d = Queue.dequeue_exn q in
+        for i = 0 to num_moves - 1 do
+          let next_r = rot_matrices.(i) *@* curr in
+          if not (Hashtbl.mem visited next_r) then begin
+            if is_goal c next_r then return (d + 1);
+            Hashtbl.set visited ~key:next_r ~data:();
+            Queue.enqueue q (next_r, d + 1)
+          end
+        done
+      done;
+      0
+  )
 
 (* Lazy distance heuristics *)
 let dist_solved_cache = Hashtbl.Poly.create ()
@@ -137,8 +139,7 @@ let min_moves_to_pos c r =
 let fold2 a b ~init ~f =
   let len = Iarray.length a in
   let rec loop i acc =
-    if i = len then acc
-    else loop (i + 1) (f acc (Iarray.get a i) (Iarray.get b i))
+    if i = len then acc else loop (i + 1) (f acc a.%(i) b.%(i))
   in
   loop 0 init
 
@@ -298,9 +299,7 @@ let count_matching f cube =
   let rec loop i acc =
     if i = len then acc
     else
-      let inc =
-        if f (Iarray.get cubelets i) (Iarray.get cube i) then 1 else 0
-      in
+      let inc = if f cubelets.%(i) cube.%(i) then 1 else 0 in
       loop (i + 1) (acc + inc)
   in
   loop 0 0
@@ -349,8 +348,8 @@ let bottom_left_front_corner cube =
   let rec loop i =
     if i = len then failwith "Corner not found"
     else
-      let r = Iarray.get cube i in
-      if r *@ Iarray.get cubelets i = target then (i, r) else loop (i + 1)
+      let r = cube.%(i) in
+      if r *@ cubelets.%(i) = target then (i, r) else loop (i + 1)
   in
   loop 0
 
@@ -381,9 +380,7 @@ let solve_endgame cube =
     let bm = rot_matrices.(bottom) in
     let rec check k rot =
       k < 4
-      && (is_cubelet_solved (Iarray.get cubelets c_idx) rot
-         || check (k + 1) (bm *@* rot)
-         )
+      && (is_cubelet_solved cubelets.%(c_idx) rot || check (k + 1) (bm *@* rot))
     in
     check 0 r
   in
