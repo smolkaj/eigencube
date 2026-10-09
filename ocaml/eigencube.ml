@@ -10,15 +10,13 @@ type vec = int * int * int [@@deriving compare, hash, sexp]
 type mat = vec * vec * vec [@@deriving compare, hash, sexp]
 type move = { normal : vec; dir : int } [@@deriving compare, sexp]
 
-let hash_fold_array f state arr =
-  Array.fold arr ~init:state ~f:(fun s x -> f s x)
+(* Hook required by [@@deriving hash] for array types in Base *)
+let hash_fold_array f state arr = Array.fold arr ~init:state ~f
 
 (* 26 cubelets, each mapped to its current 3x3 rotation matrix *)
 module Cube = struct
   type t = mat array [@@deriving compare, hash, sexp]
 end
-
-type cube = Cube.t
 
 let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
 let dot (x1, y1, z1) (x2, y2, z2) = (x1 * x2) + (y1 * y2) + (z1 * z2)
@@ -91,17 +89,16 @@ let is_cubelet_solved c r =
   sticker_directions = colors
 
 let is_cubelet_pos_solved c r = r *@ c = c
-let solved_cube () : cube = Array.create ~len:num_cubelets id3
+let solved_cube () : Cube.t = Array.create ~len:num_cubelets id3
 
-let apply_move m (cube : cube) : cube =
+let apply_move m cube : Cube.t =
   let v = moves.(m).normal and rm = rot_matrices.(m) in
   Array.init num_cubelets ~f:(fun i ->
       let r = cube.(i) in
       if dot v (r *@ cubelets.(i)) > 0 then rm *@* r else r
   )
 
-let is_cube_solved (cube : cube) =
-  Array.for_all2_exn cubelets cube ~f:is_cubelet_solved
+let is_cube_solved cube = Array.for_all2_exn cubelets cube ~f:is_cubelet_solved
 
 let single_cubelet_bfs c r is_goal =
   if is_goal c r then 0
@@ -110,25 +107,28 @@ let single_cubelet_bfs c r is_goal =
     let visited = Hashtbl.Poly.create () in
     Queue.enqueue q (r, 0);
     Hashtbl.set visited ~key:r ~data:0;
-    let res = ref None in
-    while Option.is_none !res && not (Queue.is_empty q) do
-      let curr_r, d = Queue.dequeue_exn q in
-      for m = 0 to num_moves - 1 do
-        if Option.is_none !res then begin
-          let next_r = rot_matrices.(m) *@* curr_r in
-          if not (Hashtbl.mem visited next_r) then
-            begin if is_goal c next_r then res := Some (d + 1)
-            else begin
-              Hashtbl.set visited ~key:next_r ~data:(d + 1);
-              Queue.enqueue q (next_r, d + 1)
-            end
-            end
-        end
-      done
-    done;
-    match !res with
-    | Some d -> d
-    | None -> 0
+    let rec bfs () =
+      match Queue.dequeue q with
+      | None -> 0
+      | Some (curr_r, d) -> (
+        let found =
+          Array.find_map rot_matrices ~f:(fun rm ->
+              let next_r = rm *@* curr_r in
+              if Hashtbl.mem visited next_r then None
+              else if is_goal c next_r then Some (d + 1)
+              else begin
+                Hashtbl.set visited ~key:next_r ~data:(d + 1);
+                Queue.enqueue q (next_r, d + 1);
+                None
+              end
+          )
+        in
+        match found with
+        | Some ans -> ans
+        | None -> bfs ()
+      )
+    in
+    bfs ()
 
 (* Lazy distance heuristics *)
 let dist_solved_cache = Hashtbl.Poly.create ()
@@ -145,54 +145,58 @@ let min_moves_to_pos c r =
       single_cubelet_bfs c r is_cubelet_pos_solved
   )
 
-let top_layer_heuristic (cube : cube) =
-  let p = 0.5 and sum = ref 0.0 in
-  for i = 0 to num_cubelets - 1 do
-    let _, _, z = cubelets.(i) in
-    if z = 1 then
-      let d = min_moves_to_solved cubelets.(i) cube.(i) in
-      sum := !sum +. (Float.of_int d **. p)
-  done;
-  (!sum **. (1.0 /. p)) /. 8.0
+let top_layer_heuristic cube =
+  let p = 0.5 in
+  let sum =
+    Array.fold2_exn cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
+        if z = 1 then acc +. (Float.of_int (min_moves_to_solved c r) **. p)
+        else acc
+    )
+  in
+  (sum **. (1.0 /. p)) /. 8.0
 
-let middle_layer_heuristic (cube : cube) =
-  let p = 0.5 and sum = ref 0.0 in
-  for i = 0 to num_cubelets - 1 do
-    let _, _, z = cubelets.(i) in
-    if z >= 0 then
-      let d = min_moves_to_solved cubelets.(i) cube.(i) in
-      sum := !sum +. (Float.of_int d **. p)
-  done;
-  (!sum **. (1.0 /. p)) /. 4.0
+let middle_layer_heuristic cube =
+  let p = 0.5 in
+  let sum =
+    Array.fold2_exn cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
+        if z >= 0 then acc +. (Float.of_int (min_moves_to_solved c r) **. p)
+        else acc
+    )
+  in
+  (sum **. (1.0 /. p)) /. 4.0
 
-let bottom_layer_edge_heuristic (cube : cube) =
-  let p = 0.5 and sum = ref 0.0 in
-  for i = 0 to num_cubelets - 1 do
-    let c = cubelets.(i) in
-    let _, _, z = c in
-    if not (z = -1 && norm1 c = 3) then
-      let d = min_moves_to_solved c cube.(i) in
-      sum := !sum +. (Float.of_int d **. p)
-  done;
-  (!sum **. (1.0 /. p)) /. 3.0
+let bottom_layer_edge_heuristic cube =
+  let p = 0.5 in
+  let sum =
+    Array.fold2_exn cubelets cube ~init:0.0 ~f:(fun acc ((_, _, z) as c) r ->
+        if not (z = -1 && norm1 c = 3) then
+          acc +. (Float.of_int (min_moves_to_solved c r) **. p)
+        else acc
+    )
+  in
+  (sum **. (1.0 /. p)) /. 3.0
 
-let bottom_layer_corner_heuristic (cube : cube) =
-  let p = 0.5 and s1 = ref 0.0 and s2 = ref 0.0 and s3 = ref 0.0 in
-  for i = 0 to num_cubelets - 1 do
-    let c = cubelets.(i) and r = cube.(i) in
-    let _, _, z = c in
-    if z = 1 then s1 := !s1 +. (Float.of_int (min_moves_to_solved c r) **. p)
-    else if z = 0 then
-      s2 := !s2 +. (Float.of_int (min_moves_to_solved c r) **. p)
-    else if z = -1 then
-      let d =
-        if norm1 c = 3 then min_moves_to_pos c r else min_moves_to_solved c r
-      in
-      s3 := !s3 +. (Float.of_int d **. p)
-  done;
-  ((!s1 **. (1.0 /. p)) /. 5.0)
-  +. ((!s2 **. (1.0 /. p)) /. 3.0)
-  +. ((!s3 **. (1.0 /. p)) /. 8.0)
+let bottom_layer_corner_heuristic cube =
+  let p = 0.5 in
+  let s1, s2, s3 =
+    Array.fold2_exn cubelets cube ~init:(0.0, 0.0, 0.0)
+      ~f:(fun (s1, s2, s3) ((_, _, z) as c) r ->
+        if z = 1 then
+          (s1 +. (Float.of_int (min_moves_to_solved c r) **. p), s2, s3)
+        else if z = 0 then
+          (s1, s2 +. (Float.of_int (min_moves_to_solved c r) **. p), s3)
+        else if z = -1 then
+          let d =
+            if norm1 c = 3 then min_moves_to_pos c r
+            else min_moves_to_solved c r
+          in
+          (s1, s2, s3 +. (Float.of_int d **. p))
+        else (s1, s2, s3)
+    )
+  in
+  ((s1 **. (1.0 /. p)) /. 5.0)
+  +. ((s2 **. (1.0 /. p)) /. 3.0)
+  +. ((s3 **. (1.0 /. p)) /. 8.0)
 
 (* Functional pairing heap priority queue *)
 type 'a heap = Empty | Node of float * 'a * 'a heap list
@@ -306,19 +310,19 @@ let astar start is_goal heuristic random_weight max_moves =
     in
     attempt max_moves
 
-let count_solved pred (cube : cube) =
+let count_solved pred cube =
   Array.counti cube ~f:(fun i r ->
       pred cubelets.(i) && is_cubelet_solved cubelets.(i) r
   )
 
-let count_bottom_edges_positioned (cube : cube) =
+let count_bottom_edges_positioned cube =
   Array.counti cube ~f:(fun i r ->
       let c = cubelets.(i) in
       let _, _, z = c in
       z = -1 && norm1 c = 2 && r *@ (0, 0, -1) = (0, 0, -1)
   )
 
-let count_bottom_corners_positioned (cube : cube) =
+let count_bottom_corners_positioned cube =
   Array.counti cube ~f:(fun i r ->
       let c = cubelets.(i) in
       let _, _, z = c in
@@ -331,19 +335,20 @@ let log fmt =
   printf (Stdlib.( ^^ ) fmt "\n%!")
 
 let solve_layer name total is_goal heuristic rw cube =
-  let curr = ref cube and moves_acc = ref [] in
-  for i = 0 to total - 1 do
-    log "%s #%d" name (i + 1);
-    match astar !curr (is_goal i) (heuristic i) rw 100_000 with
-    | Some (next_c, mvs) ->
-      log "-> found solution with %d moves" (List.length mvs);
-      curr := next_c;
-      moves_acc := mvs :: !moves_acc
-    | None -> failwith ("Failed " ^ name)
-  done;
-  (!curr, List.concat (List.rev !moves_acc))
+  let rec loop i curr moves_acc =
+    if i = total then (curr, List.concat (List.rev moves_acc))
+    else begin
+      log "%s #%d" name (i + 1);
+      match astar curr (is_goal i) (heuristic i) rw 100_000 with
+      | Some (next_c, mvs) ->
+        log "-> found solution with %d moves" (List.length mvs);
+        loop (i + 1) next_c (mvs :: moves_acc)
+      | None -> failwith ("Failed " ^ name)
+    end
+  in
+  loop 0 cube []
 
-let bottom_left_front_corner (cube : cube) =
+let bottom_left_front_corner cube =
   let target = (1, -1, -1) in
   Array.find_mapi_exn cube ~f:(fun i r ->
       if r *@ cubelets.(i) = target then Some (i, r) else None
@@ -353,8 +358,7 @@ let find_move n d =
   Array.findi_exn moves ~f:(fun _ m -> m.normal = n && m.dir = d) |> fst
 
 (* Endgame: orient bottom corners using (R' D' R D) * 2/4 and align bottom face *)
-let solve_endgame (cube : cube) =
-  let curr = ref cube and sol = ref [] in
+let solve_endgame cube =
   let left = find_move (0, -1, 0) 1 in
   let top = find_move (0, 0, 1) 1 in
   let bottom = find_move (0, 0, -1) 1 in
@@ -370,40 +374,39 @@ let solve_endgame (cube : cube) =
       top;
     ]
   in
-  let apply m =
-    sol := m :: !sol;
-    curr := apply_move m !curr
+  let apply (c, sol) m = (apply_move m c, m :: sol) in
+  let apply_all state mvs = List.fold mvs ~init:state ~f:apply in
+  let is_corner_oriented c =
+    let c_idx, r = bottom_left_front_corner c in
+    let bm = rot_matrices.(bottom) in
+    let rec check k rot =
+      k < 4
+      && (is_cubelet_solved cubelets.(c_idx) rot || check (k + 1) (bm *@* rot))
+    in
+    check 0 r
   in
-  let is_corner_oriented () =
-    let c_idx, r = bottom_left_front_corner !curr in
-    let rot = ref r and solved = ref false in
-    for _ = 0 to 3 do
-      if is_cubelet_solved cubelets.(c_idx) !rot then solved := true;
-      rot := rot_matrices.(bottom) *@* !rot
-    done;
-    !solved
+  let rec orient_corner state =
+    if is_corner_oriented (fst state) then state
+    else orient_corner (apply_all state routine)
   in
-  for _ = 0 to 3 do
-    while not (is_corner_oriented ()) do
-      List.iter routine ~f:apply
-    done;
-    apply bottom
-  done;
-  while not (is_cube_solved !curr) do
-    apply bottom
-  done;
-  (!curr, List.rev !sol)
+  let state =
+    Fn.apply_n_times ~n:4 (fun s -> apply (orient_corner s) bottom) (cube, [])
+  in
+  let rec align_bottom state =
+    if is_cube_solved (fst state) then state
+    else align_bottom (apply state bottom)
+  in
+  let final_cube, rev_sol = align_bottom state in
+  (final_cube, List.rev rev_sol)
 
 let shuffle cube iters seed =
   Stdlib.Random.init seed;
-  let curr = ref cube in
-  for _ = 1 to iters do
-    curr := apply_move (Stdlib.Random.int num_moves) !curr
-  done;
-  !curr
+  Fn.apply_n_times ~n:iters
+    (fun c -> apply_move (Stdlib.Random.int num_moves) c)
+    cube
 
 (* Full 3-phase human solver: top layer -> middle edges -> bottom layer & endgame *)
-let solve (cube : cube) =
+let solve (cube : Cube.t) =
   let t0 = Unix.gettimeofday () in
   let start_sim = !total_moves_simulated in
   let c1, s1 =
@@ -467,112 +470,3 @@ let solve (cube : cube) =
   log "- moves simulated: %d (%.0f moves/sec)" moves_simulated
     (Float.of_int moves_simulated /. Float.max 0.001 elapsed);
   moves
-
-let run_tests () =
-  printf "Running OCaml Eigencube Invariant Tests...\n%!";
-  (* Test 1: Cubelet count and canonical positions *)
-  assert (num_cubelets = 26);
-  assert (Array.length moves = 12);
-  printf "  [PASS] Cubelet count and move counts match.\n%!";
-
-  (* Test 2: Linear algebra and R * diag(c) = diag(c) invariant *)
-  let c = (1, 1, 1) in
-  assert (is_cubelet_solved c id3);
-  let rot_x = rot_matrices.(0) in
-  assert (not (is_cubelet_solved c rot_x));
-  assert (dot (1, 0, 0) (0, 1, 0) = 0);
-  assert (dot (1, 2, 3) (4, 5, 6) = 32);
-  printf
-    "  [PASS] Linear algebra and R * diag(c) = diag(c) invariant verified.\n%!";
-
-  (* Test 3: 4x single-move identity *)
-  let c0 = solved_cube () in
-  for m = 0 to num_moves - 1 do
-    let c1 = apply_move m c0 in
-    let c2 = apply_move m c1 in
-    let c3 = apply_move m c2 in
-    let c4 = apply_move m c3 in
-    assert (is_cube_solved c4);
-    assert (not (is_cube_solved c1));
-    assert (not (is_cube_solved c2));
-    assert (not (is_cube_solved c3))
-  done;
-  printf "  [PASS] All 12 moves satisfy order-4 cyclic permutation.\n%!";
-
-  (* Test 4: Inverse move cancellation *)
-  for m = 0 to num_moves - 1 do
-    let inv_m = inv_move.(m) in
-    let c_after = apply_move inv_m (apply_move m c0) in
-    assert (is_cube_solved c_after)
-  done;
-  printf "  [PASS] Inverse move cancellation verified for all 12 moves.\n%!";
-
-  (* Test 5: 6x Sexy Move identity (R U R' U') * 6 = Identity *)
-  let r = find_move (0, 1, 0) 1 in
-  let u = find_move (0, 0, 1) 1 in
-  let r_inv = inv_move.(r) in
-  let u_inv = inv_move.(u) in
-  let sexy = [ r; u; r_inv; u_inv ] in
-  let c_ref = ref (solved_cube ()) in
-  for _ = 1 to 6 do
-    List.iter sexy ~f:(fun m -> c_ref := apply_move m !c_ref)
-  done;
-  assert (is_cube_solved !c_ref);
-  printf "  [PASS] 6x Sexy Move ((R U R' U') * 6) restores identity.\n%!";
-
-  (* Test 6: Deterministic search terminates with None when budget is exceeded *)
-  let result = astar c0 (fun _ -> false) (fun _ -> 0.0) 0.0 500 in
-  assert (Option.is_none result);
-  printf
-    "  [PASS] Budget exhaustion terminates cleanly with None under \
-     deterministic search.\n\
-     %!";
-
-  (* Test 7: Short scramble solve round-trip *)
-  let scrambled = shuffle (solved_cube ()) 10 999 in
-  assert (not (is_cube_solved scrambled));
-  let sol_moves = solve scrambled in
-  let final_cube = ref scrambled in
-  List.iter sol_moves ~f:(fun m -> final_cube := apply_move m !final_cube);
-  assert (is_cube_solved !final_cube);
-  printf "  [PASS] End-to-end solve verifies cube is completely solved.\n%!";
-
-  (* Test 8: Successive solves isolation *)
-  let c1 = shuffle (solved_cube ()) 5 123 in
-  let c2 = shuffle (solved_cube ()) 5 456 in
-  let m1 = solve c1 in
-  let m2 = solve c2 in
-  assert (List.length m1 > 0);
-  assert (List.length m2 > 0);
-  printf
-    "  [PASS] Successive solves execute independently without interference.\n%!";
-
-  printf "All OCaml invariant and solver tests passed successfully!\n%!"
-
-let main () =
-  let print_usage () =
-    printf "Usage: dune exec ocaml/eigencube.exe -- [seed | --test]\n";
-    printf
-      "  [seed]   Solves a Rubik's cube scrambled from random seed (default: 42)\n";
-    printf "  --test   Runs the complete invariant and solver test suite\n"
-  in
-  let args = Sys.get_argv () in
-  if Array.length args > 1 then
-    match args.(1) with
-    | "--help" | "-h" -> print_usage ()
-    | "--test" -> run_tests ()
-    | s ->
-    match Int.of_string_opt s with
-    | Some seed ->
-      log "Solving scrambled cube (seed=%d)..." seed;
-      ignore (solve (shuffle (solved_cube ()) 100_000 seed))
-    | None ->
-      printf "Error: unrecognized option or invalid integer seed '%s'.\n\n%!" s;
-      print_usage ();
-      Stdlib.exit 1
-  else begin
-    log "Solving scrambled cube (seed=42)...";
-    ignore (solve (shuffle (solved_cube ()) 100_000 42))
-  end
-
-let () = main ()

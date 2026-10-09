@@ -1,11 +1,19 @@
-(executable
+(library
  (name eigencube)
- (public_name eigencube)
+ (modules eigencube)
  (libraries base stdio unix)
  (preprocess
   (pps ppx_jane)))
 
-(rule
- (alias runtest)
- (action
-  (run ./eigencube.exe --test)))
+(executable
+ (name main)
+ (public_name eigencube)
+ (package eigencube)
+ (modules main)
+ (libraries eigencube base stdio unix))
+
+(test
+ (name test_eigencube)
+ (package eigencube)
+ (modules test_eigencube)
+ (libraries eigencube base stdio unix))
