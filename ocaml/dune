@@ -1,7 +1,7 @@
 (library
  (name eigencube)
  (modules eigencube)
- (libraries base stdio unix)
+ (libraries base core_kernel.fheap stdio unix)
  (preprocess
   (pps ppx_jane)))
 

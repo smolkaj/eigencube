@@ -108,32 +108,24 @@ let is_cube_solved cube = Iarray.for_all2 is_cubelet_solved cubelets cube
 let single_cubelet_bfs c r is_goal =
   if is_goal c r then 0
   else
-    let q = Queue.create () in
-    let visited = Hashtbl.Poly.create () in
-    Queue.enqueue q (r, 0);
-    Hashtbl.set visited ~key:r ~data:0;
-    let rec bfs () =
-      match Queue.dequeue q with
-      | None -> 0
-      | Some (curr_r, d) -> (
-        let found =
-          Array.find_map rot_matrices ~f:(fun rm ->
+    With_return.with_return (fun r_ret ->
+        let q = Queue.create () in
+        let visited = Hashtbl.Poly.create () in
+        Queue.enqueue q (r, 0);
+        Hashtbl.set visited ~key:r ~data:0;
+        while not (Queue.is_empty q) do
+          let curr_r, d = Queue.dequeue_exn q in
+          Array.iter rot_matrices ~f:(fun rm ->
               let next_r = rm *@* curr_r in
-              if Hashtbl.mem visited next_r then None
-              else if is_goal c next_r then Some (d + 1)
-              else begin
+              if not (Hashtbl.mem visited next_r) then begin
+                if is_goal c next_r then r_ret.return (d + 1);
                 Hashtbl.set visited ~key:next_r ~data:(d + 1);
-                Queue.enqueue q (next_r, d + 1);
-                None
+                Queue.enqueue q (next_r, d + 1)
               end
           )
-        in
-        match found with
-        | Some ans -> ans
-        | None -> bfs ()
-      )
-    in
-    bfs ()
+        done;
+        0
+    )
 
 (* Lazy distance heuristics *)
 let dist_solved_cache = Hashtbl.Poly.create ()
@@ -211,27 +203,8 @@ let bottom_layer_corner_heuristic cube =
   +. ((s2 **. (1.0 /. p)) /. 3.0)
   +. ((s3 **. (1.0 /. p)) /. 8.0)
 
-(* Functional pairing heap priority queue *)
-type 'a heap = Empty | Node of float * 'a * 'a heap list
-
-let empty_heap = Empty
-
-let merge_heap h1 h2 =
-  match (h1, h2) with
-  | Empty, h | h, Empty -> h
-  | Node (p1, x1, l1), Node (p2, x2, l2) ->
-    if Float.(p1 <= p2) then Node (p1, x1, h2 :: l1) else Node (p2, x2, h1 :: l2)
-
-let push_heap h p x = merge_heap (Node (p, x, [])) h
-
-let rec merge_pairs = function
-  | [] -> Empty
-  | [ h ] -> h
-  | h1 :: h2 :: hs -> merge_heap (merge_heap h1 h2) (merge_pairs hs)
-
-let pop_heap = function
-  | Empty -> None
-  | Node (_, x, hs) -> Some (x, merge_pairs hs)
+let empty_frontier =
+  Fheap.create ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2)
 
 let random_gauss mean std =
   let u1 = Float.max 1e-15 (Stdlib.Random.float 1.0)
@@ -290,16 +263,16 @@ let astar start is_goal heuristic random_weight max_moves =
             in
             let prio = Float.of_int cost +. (hw *. heuristic dst) in
             expand_moves src last_move (m + 1)
-              (push_heap frontier prio dst)
+              (Fheap.add frontier (prio, dst))
               simulated
         end
       end
     in
 
     let rec search frontier simulated =
-      match pop_heap frontier with
+      match Fheap.pop frontier with
       | None -> None
-      | Some (src, rest_frontier) -> (
+      | Some ((_prio, src), rest_frontier) -> (
         let last_move = Option.map ~f:snd (Hashtbl.find came_from src) in
         match expand_moves src last_move 0 rest_frontier simulated with
         | `Found solution -> Some solution
@@ -317,7 +290,7 @@ let astar start is_goal heuristic random_weight max_moves =
           else search next_frontier next_simulated
       )
     in
-    search (push_heap empty_heap 0.0 start) 0
+    search (Fheap.add empty_frontier (0.0, start)) 0
   in
   if is_goal start then Some (start, []) else attempt max_moves
 
