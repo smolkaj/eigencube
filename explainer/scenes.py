@@ -1154,9 +1154,10 @@ class Outro(Narrated):
             ("sticker colors", "=", r"\text{columns of } \mathrm{diag}(c)"),
             ("state", "=", r"\text{one configuration } (c,\, R) \text{ per cubelet}"),
             ("position", "=", r"p = R\,c"),
+            ("sticker directions", "=", r"R\,\mathrm{diag}(c)"),
             ("move", ":", r"\mathbf{v}\cdot(R\,c) > 0 \;\Rightarrow\; R \leftarrow M R"),
             ("solved", r"\iff", r"R\,\mathrm{diag}(c) = \mathrm{diag}(c)"),
-        ])).arrange(DOWN, aligned_edge=LEFT, buff=0.24).move_to(0.35 * UP)
+        ])).arrange(DOWN, aligned_edge=LEFT, buff=0.2).move_to(0.35 * UP)
         self.label(recap)
         for row in recap:
             row[0].set_color(ACCENT)
@@ -1168,6 +1169,7 @@ class Outro(Narrated):
                 "A cubelet's sticker colors are the columns of diag of c.",
                 "The state of the cube is one configuration, c and R, per cubelet.",
                 "Where a cubelet is now: its position p, the matrix R applied to c.",
+                "Which way its stickers face now: the matrix R applied to diag of c.",
                 "A move is a dot product to select, and a matrix product to turn.",
                 "And a cubelet is solved when the matrix R, applied to diag of c, changes nothing."]):
             with self.voice(words, pause=0.4):
