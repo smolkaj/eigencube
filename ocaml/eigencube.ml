@@ -100,114 +100,7 @@ let apply_move m cube : Cube.t =
       if dot v (r *@ cubelets.%(i)) > 0 then rm *@* r else r
   )
 
-let single_cubelet_bfs c r ~is_goal =
-  With_return.with_return (fun { return } ->
-      if is_goal c r then return 0;
-      let q = Queue.create () in
-      let visited = Hashtbl.Poly.create () in
-      Queue.enqueue q (r, 0);
-      Hashtbl.set visited ~key:r ~data:();
-      while not (Queue.is_empty q) do
-        let curr, d = Queue.dequeue_exn q in
-        for i = 0 to num_moves - 1 do
-          let next_r = rot_matrices.(i) *@* curr in
-          if not (Hashtbl.mem visited next_r) then begin
-            if is_goal c next_r then return (d + 1);
-            Hashtbl.set visited ~key:next_r ~data:();
-            Queue.enqueue q (next_r, d + 1)
-          end
-        done
-      done;
-      0
-  )
-
-(* Lazy distance heuristics *)
-let dist_solved_cache = Hashtbl.Poly.create ()
-
-let min_moves_to_solved c r =
-  Hashtbl.find_or_add dist_solved_cache (c, r) ~default:(fun () ->
-      single_cubelet_bfs c r ~is_goal:is_cubelet_solved
-  )
-
-let dist_pos_cache = Hashtbl.Poly.create ()
-
-let min_moves_to_pos c r =
-  Hashtbl.find_or_add dist_pos_cache (c, r) ~default:(fun () ->
-      single_cubelet_bfs c r ~is_goal:is_cubelet_pos_solved
-  )
-
-let top_cubelets =
-  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
-      if z = 1 then Some (i, c) else None
-  )
-
-let middle_belt_cubelets =
-  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
-      if z = 0 then Some (i, c) else None
-  )
-
-let middle_cubelets = top_cubelets @ middle_belt_cubelets
-
-let bottom_edges =
-  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
-      if not (z = -1 && norm1 c = 3) then Some (i, c) else None
-  )
-
-let bottom_cubelets =
-  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
-      if z = -1 then Some (i, c) else None
-  )
-
-let top_layer_heuristic cube =
-  let p = 0.5 in
-  let sum =
-    List.fold top_cubelets ~init:0.0 ~f:(fun acc (i, c) ->
-        acc +. (Float.of_int (min_moves_to_solved c cube.%(i)) **. p)
-    )
-  in
-  (sum **. (1.0 /. p)) /. 8.0
-
-let middle_layer_heuristic cube =
-  let p = 0.5 in
-  let sum =
-    List.fold middle_cubelets ~init:0.0 ~f:(fun acc (i, c) ->
-        acc +. (Float.of_int (min_moves_to_solved c cube.%(i)) **. p)
-    )
-  in
-  (sum **. (1.0 /. p)) /. 4.0
-
-let bottom_layer_edge_heuristic cube =
-  let p = 0.5 in
-  let sum =
-    List.fold bottom_edges ~init:0.0 ~f:(fun acc (i, c) ->
-        acc +. (Float.of_int (min_moves_to_solved c cube.%(i)) **. p)
-    )
-  in
-  (sum **. (1.0 /. p)) /. 3.0
-
-let bottom_layer_corner_heuristic cube =
-  let p = 0.5 in
-  let sum_moves group =
-    List.fold group ~init:0.0 ~f:(fun acc (i, c) ->
-        acc +. (Float.of_int (min_moves_to_solved c cube.%(i)) **. p)
-    )
-  in
-  let s1 = sum_moves top_cubelets in
-  let s2 = sum_moves middle_belt_cubelets in
-  let s3 =
-    List.fold bottom_cubelets ~init:0.0 ~f:(fun acc (i, c) ->
-        let d =
-          if norm1 c = 3 then min_moves_to_pos c cube.%(i)
-          else min_moves_to_solved c cube.%(i)
-        in
-        acc +. (Float.of_int d **. p)
-    )
-  in
-  ((s1 **. (1.0 /. p)) /. 5.0)
-  +. ((s2 **. (1.0 /. p)) /. 3.0)
-  +. ((s3 **. (1.0 /. p)) /. 8.0)
-
-let empty_frontier =
+let empty_frontier () =
   Fheap.create ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2)
 
 let random_gauss ~mean ~std =
@@ -239,10 +132,12 @@ let should_prune last_move move =
     dot n1 n2 = -1 && Poly.(n1 > n2)
 
 (* Multi-phase A* search with move-budgeted restarts (1.5x expansion) *)
-let astar ~start ~is_goal ~heuristic ~random_weight ~max_moves =
+let astar (type state) ~(start : state) ~(is_goal : state -> bool)
+    ~(apply_move : int -> state -> state) ?(heuristic = fun _ -> 0.0)
+    ?(random_weight = 0.0) ?(max_moves = 100_000) () =
   let rec attempt budget =
-    let came_from = Hashtbl.create (module Cube) ~size:8192 in
-    let cost_so_far = Hashtbl.create (module Cube) ~size:8192 in
+    let came_from = Hashtbl.Poly.create ~size:8192 () in
+    let cost_so_far = Hashtbl.Poly.create ~size:8192 () in
     Hashtbl.set cost_so_far ~key:start ~data:0;
 
     let rec expand_moves src last_move move frontier simulated =
@@ -301,9 +196,91 @@ let astar ~start ~is_goal ~heuristic ~random_weight ~max_moves =
           else search next_frontier next_simulated
       )
     in
-    search (Fheap.add empty_frontier (0.0, start)) 0
+    search (Fheap.add (empty_frontier ()) (0.0, start)) 0
   in
   if is_goal start then Some (start, []) else attempt max_moves
+
+(* Single-cubelet distance heuristics via unified A* search *)
+let dist_solved_cache = Hashtbl.Poly.create ()
+
+let min_moves_to_solved c r =
+  Hashtbl.find_or_add dist_solved_cache (c, r) ~default:(fun () ->
+      match
+        astar ~start:r ~is_goal:(is_cubelet_solved c)
+          ~apply_move:(fun m r -> rot_matrices.(m) *@* r)
+          ()
+      with
+      | Some (_, path) -> List.length path
+      | None -> 0
+  )
+
+let dist_pos_cache = Hashtbl.Poly.create ()
+
+let min_moves_to_pos c r =
+  Hashtbl.find_or_add dist_pos_cache (c, r) ~default:(fun () ->
+      match
+        astar ~start:r ~is_goal:(is_cubelet_pos_solved c)
+          ~apply_move:(fun m r -> rot_matrices.(m) *@* r)
+          ()
+      with
+      | Some (_, path) -> List.length path
+      | None -> 0
+  )
+
+let top_cubelets =
+  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
+      if z = 1 then Some (i, c) else None
+  )
+
+let middle_belt_cubelets =
+  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
+      if z = 0 then Some (i, c) else None
+  )
+
+let middle_cubelets = top_cubelets @ middle_belt_cubelets
+
+let bottom_edges =
+  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
+      if not (z = -1 && norm1 c = 3) then Some (i, c) else None
+  )
+
+let bottom_cubelets =
+  List.filter_mapi (Iarray.to_list cubelets) ~f:(fun i ((_, _, z) as c) ->
+      if z = -1 then Some (i, c) else None
+  )
+
+let norm_p05 group ~f =
+  let sum =
+    List.fold group ~init:0.0 ~f:(fun acc item ->
+        acc +. Float.sqrt (Float.of_int (f item))
+    )
+  in
+  sum *. sum
+
+let top_layer_heuristic cube =
+  norm_p05 top_cubelets ~f:(fun (i, c) -> min_moves_to_solved c cube.%(i))
+  /. 8.0
+
+let middle_layer_heuristic cube =
+  norm_p05 middle_cubelets ~f:(fun (i, c) -> min_moves_to_solved c cube.%(i))
+  /. 4.0
+
+let bottom_layer_edge_heuristic cube =
+  norm_p05 bottom_edges ~f:(fun (i, c) -> min_moves_to_solved c cube.%(i))
+  /. 3.0
+
+let bottom_layer_corner_heuristic cube =
+  norm_p05 top_cubelets ~f:(fun (i, c) -> min_moves_to_solved c cube.%(i))
+  /. 5.0
+  +. norm_p05 middle_belt_cubelets ~f:(fun (i, c) ->
+         min_moves_to_solved c cube.%(i)
+     )
+     /. 3.0
+  +. norm_p05 bottom_cubelets ~f:(fun (i, c) ->
+         if norm1 c = 3 then min_moves_to_pos c cube.%(i)
+         else min_moves_to_solved c cube.%(i)
+     )
+     /. 8.0
 
 let count_matching ~f cube =
   let len = Iarray.length cube in
@@ -345,8 +322,8 @@ let solve_layer ~name ~total ~is_goal ~heuristic ~random_weight cube =
     else begin
       log "%s #%d" name (i + 1);
       match
-        astar ~start:curr ~is_goal:(is_goal i) ~heuristic:(heuristic i)
-          ~random_weight ~max_moves:100_000
+        astar ~start:curr ~is_goal:(is_goal i) ~apply_move
+          ~heuristic:(heuristic i) ~random_weight ~max_moves:100_000 ()
       with
       | Some (next_c, mvs) ->
         log "-> found solution with %d moves" (List.length mvs);

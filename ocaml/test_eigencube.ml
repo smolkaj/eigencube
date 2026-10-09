@@ -59,8 +59,9 @@ let run_tests () =
   let result =
     astar ~start:c0
       ~is_goal:(fun _ -> false)
+      ~apply_move
       ~heuristic:(fun _ -> 0.0)
-      ~random_weight:0.0 ~max_moves:500
+      ~random_weight:0.0 ~max_moves:500 ()
   in
   assert (Option.is_none result);
   printf
