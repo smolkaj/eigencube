@@ -6,13 +6,13 @@ let run_tests () =
   printf "Running OCaml Eigencube Invariant Tests...\n%!";
   (* Test 1: Cubelet count and canonical positions *)
   assert (num_cubelets = 26);
-  assert (Array.length moves = 12);
+  assert (List.length moves = 12);
   printf "  [PASS] Cubelet count and move counts match.\n%!";
 
   (* Test 2: Linear algebra and R * diag(c) = diag(c) invariant *)
   let c = (1, 1, 1) in
   assert (is_cubelet_solved c id3);
-  let rot_x = rot_matrices.(0) in
+  let rot_x = rot_mat (List.hd_exn moves) in
   assert (not (is_cubelet_solved c rot_x));
   assert (dot (1, 0, 0) (0, 1, 0) = 0);
   assert (dot (1, 2, 3) (4, 5, 6) = 32);
@@ -21,31 +21,31 @@ let run_tests () =
 
   (* Test 3: 4x single-move identity *)
   let c0 = solved_cube in
-  for m = 0 to num_moves - 1 do
-    let c1 = apply_move m c0 in
-    let c2 = apply_move m c1 in
-    let c3 = apply_move m c2 in
-    let c4 = apply_move m c3 in
-    assert (is_cube_solved c4);
-    assert (not (is_cube_solved c1));
-    assert (not (is_cube_solved c2));
-    assert (not (is_cube_solved c3))
-  done;
+  List.iter moves ~f:(fun m ->
+      let c1 = apply_move m c0 in
+      let c2 = apply_move m c1 in
+      let c3 = apply_move m c2 in
+      let c4 = apply_move m c3 in
+      assert (is_cube_solved c4);
+      assert (not (is_cube_solved c1));
+      assert (not (is_cube_solved c2));
+      assert (not (is_cube_solved c3))
+  );
   printf "  [PASS] All 12 moves satisfy order-4 cyclic permutation.\n%!";
 
   (* Test 4: Inverse move cancellation *)
-  for m = 0 to num_moves - 1 do
-    let inv_m = inv_move.(m) in
-    let c_after = apply_move inv_m (apply_move m c0) in
-    assert (is_cube_solved c_after)
-  done;
+  List.iter moves ~f:(fun m ->
+      let inv_m = invert_move m in
+      let c_after = apply_move inv_m (apply_move m c0) in
+      assert (is_cube_solved c_after)
+  );
   printf "  [PASS] Inverse move cancellation verified for all 12 moves.\n%!";
 
   (* Test 5: 6x Sexy Move identity (R U R' U') * 6 = Identity *)
-  let r = find_move ~normal:(0, 1, 0) ~dir:1 in
-  let u = find_move ~normal:(0, 0, 1) ~dir:1 in
-  let r_inv = inv_move.(r) in
-  let u_inv = inv_move.(u) in
+  let r = { normal = (0, 1, 0); dir = 1 } in
+  let u = { normal = (0, 0, 1); dir = 1 } in
+  let r_inv = invert_move r in
+  let u_inv = invert_move u in
   let sexy = [ r; u; r_inv; u_inv ] in
   let c_sexy =
     Fn.apply_n_times ~n:6
