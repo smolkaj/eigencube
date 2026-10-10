@@ -16,6 +16,50 @@ fn test_linear_algebra_invariants() {
   assert_eq!(Vec3(1, 2, 3).dot(Vec3(4, 5, 6)), 32);
 }
 
+fn cross(a: Vec3, b: Vec3) -> Vec3 {
+  Vec3(a.1 * b.2 - a.2 * b.1, a.2 * b.0 - a.0 * b.2, a.0 * b.1 - a.1 * b.0)
+}
+
+// Dir 1 is clockwise as seen looking at the face `normal` points to, for every face: a
+// clockwise quarter turn about v takes each p perpendicular to v to M p with
+// v · (p × M p) = -|p|². Order 4, det and the fixed axis all pass for a mirror-imaged turn.
+#[test]
+fn test_moves_turn_the_way_they_are_named() {
+  for &m in &MOVES {
+    for &p in &UNIT_VECTORS {
+      if p.dot(m.normal) == 0 {
+        assert_eq!(m.normal.dot(cross(p, m.rot_mat() * p)), -(m.dir as i32), "{m:?} turns the wrong way");
+      }
+    }
+  }
+}
+
+// Turning a face clockwise is the same rotation as turning its opposite face counterclockwise.
+#[test]
+fn test_opposite_face_turns_the_other_way() {
+  for &m in &MOVES {
+    let Vec3(x, y, z) = m.normal;
+    assert_eq!(m.rot_mat(), Move::new(Vec3(-x, -y, -z), -m.dir).rot_mat(), "{m:?}");
+  }
+}
+
+// Clockwise turns of U D F B R L move cubelets where Singmaster notation says they go.
+#[test]
+fn test_standard_notation() {
+  let clockwise = [
+    // (face, a cubelet's home, where the clockwise turn takes it)
+    (Vec3(0, 0, 1), Vec3(1, 0, 1), Vec3(0, -1, 1)), // U: front-top edge to left-top
+    (Vec3(0, 0, -1), Vec3(1, 0, -1), Vec3(0, 1, -1)), // D: front-bottom edge to right-bottom
+    (Vec3(1, 0, 0), Vec3(1, 0, 1), Vec3(1, 1, 0)),  // F: top-front edge to right-front
+    (Vec3(-1, 0, 0), Vec3(-1, 0, 1), Vec3(-1, -1, 0)), // B: top-back edge to left-back
+    (Vec3(0, 1, 0), Vec3(1, 1, 0), Vec3(0, 1, 1)),  // R: front-right edge to top-right
+    (Vec3(0, -1, 0), Vec3(1, -1, 0), Vec3(0, -1, -1)), // L: front-left edge to bottom-left
+  ];
+  for (face, home, after) in clockwise {
+    assert_eq!(Move::new(face, 1).rot_mat() * home, after, "{face:?}");
+  }
+}
+
 #[test]
 fn test_4x_single_move_identity() {
   let c0 = SOLVED_CUBE;

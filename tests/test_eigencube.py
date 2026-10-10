@@ -17,6 +17,7 @@ from eigencube import (
     astar,
     norm1,
     rotation_matrix,
+    describe_move,
     inverse_move,
     NUM_CUBELETS,
 )
@@ -60,6 +61,41 @@ class TestEigencube(unittest.TestCase):
             self.assertTrue(np.isclose(np.linalg.det(M), 1.0), f"det(M) != 1 for move {move}")
             # Rotational axis preservation: M @ v = v
             self.assertTrue(np.allclose(M @ np.array(v), np.array(v)), f"Axis not fixed for move {move}")
+
+    def test_moves_turn_the_way_they_are_named(self):
+        """Direction 1 is clockwise as seen looking at the face `v` points to, for every face.
+
+        Seen from outside the face, a clockwise quarter turn about v takes each vector p
+        perpendicular to v to M p with v · (p × M p) = -|p|²; counterclockwise gives +|p|².
+        Order-4, det and axis checks all pass for a mirror-imaged turn, so only this catches it.
+        """
+        for move in moves:
+            v, direction = move
+            M = rotation_matrix(move)
+            for p in unit_vectors:
+                if np.dot(p, v) == 0:
+                    self.assertEqual(np.dot(v, np.cross(p, M @ np.array(p))), -direction,
+                                     f"{describe_move(move)} turns the wrong way")
+
+    def test_opposite_face_turns_the_other_way(self):
+        """Turning a face clockwise is the same rotation as turning its opposite face counterclockwise."""
+        for (x, y, z), direction in moves:
+            self.assertTrue(np.array_equal(rotation_matrix(((x, y, z), direction)),
+                                           rotation_matrix(((-x, -y, -z), -direction))))
+
+    def test_standard_notation(self):
+        """Clockwise turns of U D F B R L move cubelets where Singmaster notation says they go."""
+        clockwise = {  # face: (a cubelet's home, where the clockwise turn takes it)
+            (0, 0, 1): ((1, 0, 1), (0, -1, 1)),     # U: front-top edge to left-top
+            (0, 0, -1): ((1, 0, -1), (0, 1, -1)),   # D: front-bottom edge to right-bottom
+            (1, 0, 0): ((1, 0, 1), (1, 1, 0)),      # F: top-front edge to right-front
+            (-1, 0, 0): ((-1, 0, 1), (-1, -1, 0)),  # B: top-back edge to left-back
+            (0, 1, 0): ((1, 1, 0), (0, 1, 1)),      # R: front-right edge to top-right
+            (0, -1, 0): ((1, -1, 0), (0, -1, -1)),  # L: front-left edge to bottom-left
+        }
+        for v, (home, after) in clockwise.items():
+            self.assertEqual(tuple(rotation_matrix((v, 1)) @ np.array(home)), after,
+                             describe_move((v, 1)))
 
     def test_single_move_order_4(self):
         """Every 90-degree face turn must have order 4 (cycle of 4 returns to identity)."""

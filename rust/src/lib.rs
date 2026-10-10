@@ -71,13 +71,15 @@ impl Move {
   pub const fn invert(self) -> Self {
     Self::new(self.normal, -self.dir)
   }
+  // A quarter turn about the normal v, clockwise as seen looking at that face (dir = 1):
+  // M = v vᵀ - dir [v]ₓ keeps the part along v and turns the rest by the cross product with v.
   pub const fn rot_mat(self) -> Mat3 {
-    let (Vec3(x, y, _), d) = (self.normal, self.dir);
-    match (x != 0, y != 0) {
-      (true, _) => Mat3(Vec3(1, 0, 0), Vec3(0, 0, d), Vec3(0, -d, 0)),
-      (_, true) => Mat3(Vec3(0, 0, d), Vec3(0, 1, 0), Vec3(-d, 0, 0)),
-      _ => Mat3(Vec3(0, d, 0), Vec3(-d, 0, 0), Vec3(0, 0, 1)),
-    }
+    let (Vec3(x, y, z), d) = (self.normal, self.dir);
+    Mat3(
+      Vec3(x * x, x * y + d * z, x * z - d * y),
+      Vec3(y * x - d * z, y * y, y * z + d * x),
+      Vec3(z * x + d * y, z * y - d * x, z * z),
+    )
   }
 }
 

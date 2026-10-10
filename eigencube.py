@@ -44,8 +44,8 @@ unit_vectors = [v for v in vectors if norm1(v) == 1]
 solved_cube = tuple((c, tupled(np.identity(3))) for c in vectors if any(c))
 NUM_CUBELETS = len(solved_cube)
 
-# A move is a clockwise or counterclockwise 90 degree rotation of the
-# slice pointed at by a unit vector.
+# A move is a 90 degree rotation of the slice pointed at by a unit vector,
+# clockwise (direction 1) or counterclockwise (-1) as seen looking at that face.
 moves = [(v, direction) for v in unit_vectors for direction in [-1, 1]]
 
 # Each color is encoded by the unit vector corresponding to the direction that
@@ -108,17 +108,14 @@ def inverse_move(move):
 @functools.cache
 def rotation_matrix(move):
   v, direction = move
-  # The rotational axis is the dimension into which `v` is pointing.
-  fixed_dim = next(i for i in range(3) if v[i])
-  # The rotation takes place in the other two dimensions.
-  r1, r2 = (i for i in range(3) if i != fixed_dim)
-
-  M = np.zeros([3, 3])
-  M[fixed_dim, fixed_dim] = 1
-  # The 90 degree rotation matrix [[0, 1], [-1,0]], adjusted by direction.
-  # https://en.wikipedia.org/wiki/Rotation_matrix#Common_rotations
-  M[r1, r2], M[r2, r1] = direction, -direction
-  return M
+  # A quarter turn about the axis `v`, clockwise as seen looking at the face `v`
+  # points to (direction 1) or counterclockwise (direction -1). It keeps the part
+  # of a vector along `v` (the projection v vᵀ) and turns the rest a quarter turn,
+  # which is the cross product with `v`.
+  # https://en.wikipedia.org/wiki/Rotation_matrix#Rotation_matrix_from_axis_and_angle
+  x, y, z = v
+  cross = np.array([[0, -z, y], [z, 0, -x], [-y, x, 0]])  # cross @ p = v × p
+  return np.outer(v, v) - direction * cross
 
 @functools.cache
 def apply_move_to_cubelet_rotation(move, cubelet, rotation):

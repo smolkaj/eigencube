@@ -89,6 +89,50 @@ let run_tests () =
   printf
     "  [PASS] Successive solves execute independently without interference.\n%!";
 
+  (* Test 9: Dir 1 is clockwise as seen looking at the face the normal points
+     to, for every face: a clockwise quarter turn about v takes each p
+     perpendicular to v to M p with v . (p x M p) = -|p|^2. Order 4, det and
+     the fixed axis all pass for a mirror-imaged turn. *)
+  let cross (a1, a2, a3) (b1, b2, b3) =
+    ((a2 * b3) - (a3 * b2), (a3 * b1) - (a1 * b3), (a1 * b2) - (a2 * b1))
+  in
+  List.iter moves ~f:(fun m ->
+      List.iter unit_vectors ~f:(fun p ->
+          if dot p m.normal = 0 then
+            assert (dot m.normal (cross p (rot_mat m *@ p)) = -m.dir)
+      )
+  );
+  printf
+    "  [PASS] Every move turns the way its dir says, seen from its face.\n%!";
+
+  (* Test 10: Turning a face clockwise is the same rotation as turning its
+     opposite face counterclockwise. *)
+  List.iter moves ~f:(fun { normal = x, y, z; dir } ->
+      assert (
+        Poly.( = )
+          (rot_mat { normal = (x, y, z); dir })
+          (rot_mat { normal = (-x, -y, -z); dir = -dir })
+      )
+  );
+  printf "  [PASS] Opposite faces turn the opposite way.\n%!";
+
+  (* Test 11: Clockwise turns of U D F B R L move cubelets where Singmaster
+     notation says they go: (face, a cubelet's home, where the turn takes it). *)
+  List.iter
+    [
+      ((0, 0, 1), (1, 0, 1), (0, -1, 1)) (* U: front-top edge to left-top *);
+      ((0, 0, -1), (1, 0, -1), (0, 1, -1)) (* D: front-bottom to right-bottom *);
+      ((1, 0, 0), (1, 0, 1), (1, 1, 0)) (* F: top-front edge to right-front *);
+      ((-1, 0, 0), (-1, 0, 1), (-1, -1, 0)) (* B: top-back edge to left-back *);
+      ((0, 1, 0), (1, 1, 0), (0, 1, 1)) (* R: front-right edge to top-right *);
+      ((0, -1, 0), (1, -1, 0), (0, -1, -1)) (* L: front-left to bottom-left *);
+    ]
+    ~f:(fun (face, home, after) ->
+      assert (Poly.( = ) (rot_mat { normal = face; dir = 1 } *@ home) after)
+    );
+  printf
+    "  [PASS] Clockwise turns match Singmaster notation for all six faces.\n%!";
+
   printf "All OCaml invariant and solver tests passed successfully!\n%!"
 
 let () = run_tests ()
