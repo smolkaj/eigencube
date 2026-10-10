@@ -6,19 +6,10 @@ open Base
 open Stdio
 open Poly
 
-module Vec = struct
-  module T = struct
-    type t = int * int * int [@@deriving compare, sexp]
-  end
-
-  include T
-  include Comparator.Make (T)
-end
-
-type vec = Vec.t [@@deriving compare, sexp]
+type vec = int * int * int [@@deriving compare, sexp]
 type mat = vec * vec * vec [@@deriving compare, sexp]
 type move = { normal : vec; dir : int } [@@deriving compare, sexp]
-type cube = mat Map.M(Vec).t
+type cube = (vec, mat) Map.Poly.t
 
 let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
 let dot (x1, y1, z1) (x2, y2, z2) = (x1 * x2) + (y1 * y2) + (z1 * z2)
@@ -55,8 +46,7 @@ let num_cubelets = List.length cubelets
 let unit_vectors = List.filter all_vectors ~f:(fun v -> norm1 v = 1)
 
 let moves =
-  unit_vectors
-  |> List.concat_map ~f:(fun normal ->
+  List.concat_map unit_vectors ~f:(fun normal ->
       [ { normal; dir = -1 }; { normal; dir = 1 } ]
   )
 
@@ -78,9 +68,9 @@ let is_cube_solved (cube : cube) =
 let is_cubelet_pos_solved c r = r *@ c = c
 
 let solved_cube : cube =
-  List.fold cubelets
-    ~init:(Map.empty (module Vec))
-    ~f:(fun acc c -> Map.set acc ~key:c ~data:id3)
+  List.fold cubelets ~init:Map.Poly.empty ~f:(fun acc c ->
+      Map.set acc ~key:c ~data:id3
+  )
 
 let apply_move move (cube : cube) : cube =
   let v = move.normal and rm = rot_mat move in
@@ -244,20 +234,16 @@ let bottom_layer_corner_heuristic (cube : cube) =
      )
      /. 8.0
 
-let count_matching ~f (cube : cube) =
-  Map.fold cube ~init:0 ~f:(fun ~key:c ~data:r acc ->
-      if f c r then acc + 1 else acc
-  )
+let count_solved ~f (cube : cube) =
+  Map.counti cube ~f:(fun ~key:c ~data:r -> f c && is_cubelet_solved c r)
 
-let count_solved ~f = count_matching ~f:(fun c r -> f c && is_cubelet_solved c r)
-
-let count_bottom_edges_positioned =
-  count_matching ~f:(fun ((_, _, z) as c) r ->
+let count_bottom_edges_positioned (cube : cube) =
+  Map.counti cube ~f:(fun ~key:((_, _, z) as c) ~data:r ->
       z = -1 && norm1 c = 2 && r *@ (0, 0, -1) = (0, 0, -1)
   )
 
-let count_bottom_corners_positioned =
-  count_matching ~f:(fun ((_, _, z) as c) r ->
+let count_bottom_corners_positioned (cube : cube) =
+  Map.counti cube ~f:(fun ~key:((_, _, z) as c) ~data:r ->
       z = -1 && norm1 c = 3 && is_cubelet_pos_solved c r
   )
 
@@ -283,7 +269,7 @@ let solve_layer ~name ~total ~is_goal ~heuristic ~random_weight cube =
 
 let bottom_left_front_corner (cube : cube) =
   let target = (1, -1, -1) in
-  match Map.to_alist cube |> List.find ~f:(fun (c, r) -> r *@ c = target) with
+  match List.find (Map.to_alist cube) ~f:(fun (c, r) -> r *@ c = target) with
   | Some (c, r) -> (c, r)
   | None -> failwith "Corner not found"
 
