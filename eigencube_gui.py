@@ -22,8 +22,9 @@ def load_window_icon():
         # Pillow is a hard dependency; SDL_image support is optional in some pygame builds.
         from PIL import Image
         with Image.open(path) as icon:
-            if icon.mode == "RGBA":
-                return pygame.image.frombuffer(icon.tobytes(), icon.size, "RGBA")
+            if "A" in icon.getbands():  # preserve the PNG's own color type
+                rgba = icon.convert("RGBA")
+                return pygame.image.frombuffer(rgba.tobytes(), rgba.size, "RGBA")
             rgb = icon.convert("RGB")
             return pygame.image.frombuffer(rgb.tobytes(), rgb.size, "RGB")
 
@@ -215,9 +216,11 @@ def save_frame(surface, output_path):
         pygame.image.save(surface, output_path)
     except (pygame.error, NotImplementedError):
         from PIL import Image
-        image = Image.frombuffer("RGBA", surface.get_size(), pygame.image.tostring(surface, "RGBA"), "raw", "RGBA", 0, 1)
-        if not (surface.get_flags() & pygame.SRCALPHA):
-            image = image.convert("RGB")  # match pygame's own output for opaque surfaces
+        if surface.get_flags() & pygame.SRCALPHA or surface.get_alpha() is not None:
+            # pygame's own writer emits RGBA for per-pixel or per-surface alpha
+            image = Image.frombuffer("RGBA", surface.get_size(), pygame.image.tostring(surface, "RGBA"), "raw", "RGBA", 0, 1)
+        else:
+            image = Image.frombuffer("RGB", surface.get_size(), pygame.image.tostring(surface, "RGB"), "raw", "RGB", 0, 1)
         image.save(output_path)
 
 def render_frame_to_image(cube, output_path=REPO_DIR / "img" / "gui-preview.png", solution=None, move_index=0, current_move=None, solving_cube=None):
