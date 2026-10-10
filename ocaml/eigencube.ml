@@ -32,12 +32,12 @@ let ( *@* ) (r0, r1, r2) m =
 
 let diag (x, y, z) = ((x, 0, 0), (0, y, 0), (0, 0, z))
 let id3 : mat = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
-let coordinate_range = [ -1; 0; 1 ]
 
 let all_vectors =
-  List.concat_map coordinate_range ~f:(fun x ->
-      List.concat_map coordinate_range ~f:(fun y ->
-          List.map coordinate_range ~f:(fun z -> (x, y, z))
+  let coords = [ -1; 0; 1 ] in
+  List.concat_map coords ~f:(fun x ->
+      List.concat_map coords ~f:(fun y ->
+          List.map coords ~f:(fun z -> (x, y, z))
       )
   )
 
@@ -72,7 +72,8 @@ let solved_cube : cube =
   )
 
 let apply_move move (cube : cube) : cube =
-  let v = move.normal and r' = rot_mat move in
+  let v = move.normal in
+  let r' = rot_mat move in
   Map.mapi cube ~f:(fun ~key:c ~data:r ->
       if dot v (r *@ c) > 0 then r' *@* r else r
   )
@@ -103,16 +104,6 @@ let log fmt =
 let astar (type state) ~(start : state) ~(is_goal : state -> bool)
     ~(apply_move : move -> state -> state) ?(heuristic = fun _ -> 0.0)
     ?(random_weight = 0.0) ?(max_moves = 100_000) () =
-  (* Box-Muller transform: samples N(mean, std^2), mirroring Python's random.gauss. *)
-  let random_gauss ~mean ~std =
-    let u1 = Float.max 1e-15 (Stdlib.Random.float 1.0)
-    and u2 = Stdlib.Random.float 1.0 in
-    mean
-    +. std
-       *. (Float.sqrt (-2.0 *. Float.log u1)
-          *. Float.cos (2.0 *. Float.pi *. u2)
-          )
-  in
   let rec attempt budget =
     let came_from = Hashtbl.Poly.create ~size:8192 () in
     let cost_so_far = Hashtbl.Poly.create ~size:8192 () in
@@ -143,7 +134,10 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
             else
               let hw =
                 if Float.(random_weight > 0.0) then
-                  Float.max 0.01 (random_gauss ~mean:1.0 ~std:random_weight)
+                  Float.max 0.01
+                    (Random.float_range (1.0 -. random_weight)
+                       (1.0 +. random_weight)
+                    )
                 else 1.0
               in
               let prio = Float.of_int cost +. (hw *. heuristic dst) in
@@ -185,7 +179,9 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
 let cubelet_dist cache ~is_goal c r =
   Hashtbl.find_or_add cache (c, r) ~default:(fun () ->
       match
-        astar ~start:r ~is_goal ~apply_move:(fun m r -> rot_mat m *@* r) ()
+        astar ~start:r ~is_goal:(is_goal c)
+          ~apply_move:(fun m r -> rot_mat m *@* r)
+          ()
       with
       | Some (_, path) -> List.length path
       | None -> 0
@@ -193,11 +189,11 @@ let cubelet_dist cache ~is_goal c r =
 
 let min_moves_to_solved =
   let cache = Hashtbl.Poly.create () in
-  fun c r -> cubelet_dist cache ~is_goal:(is_cubelet_solved c) c r
+  cubelet_dist cache ~is_goal:is_cubelet_solved
 
 let min_moves_to_pos =
   let cache = Hashtbl.Poly.create () in
-  fun c r -> cubelet_dist cache ~is_goal:(is_cubelet_pos_solved c) c r
+  cubelet_dist cache ~is_goal:is_cubelet_pos_solved
 
 let dist_solved c cube = min_moves_to_solved c (Map.find_exn cube c)
 let dist_pos c cube = min_moves_to_pos c (Map.find_exn cube c)
@@ -282,8 +278,8 @@ let solve_endgame cube =
   let is_corner_oriented c =
     let c_orig, r = bottom_left_front_corner c in
     let r' = rot_mat bottom in
-    let rec check k rot =
-      k < 4 && (is_cubelet_solved c_orig rot || check (k + 1) (r' *@* rot))
+    let rec check k r =
+      k < 4 && (is_cubelet_solved c_orig r || check (k + 1) (r' *@* r))
     in
     check 0 r
   in
