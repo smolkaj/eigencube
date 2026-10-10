@@ -320,12 +320,12 @@ class TestEigencube(unittest.TestCase):
         samples = ((0, 0), (128, 128), (255, 255))
         with Image.open(eigencube_gui.REPO_DIR / "img" / "icon.png") as source:
             expected_size = source.size
-            expected_alpha = source.mode == "RGBA"
-            expected_pixels = [source.getpixel(p) for p in samples]
+            rgba_source = source.convert("RGBA")  # get_at always yields RGBA, whatever the source stores
+            expected_pixels = [rgba_source.getpixel(p) for p in samples]
         with patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
             icon = eigencube_gui.load_window_icon()
         self.assertEqual(icon.get_size(), expected_size)
-        self.assertEqual(bool(icon.get_flags() & pygame.SRCALPHA), expected_alpha)
+        self.assertTrue(icon.get_flags() & pygame.SRCALPHA)
         for point, expected in zip(samples, expected_pixels):  # pixel bytes preserved
             self.assertEqual(tuple(icon.get_at(point)), expected)
 
@@ -352,6 +352,34 @@ class TestEigencube(unittest.TestCase):
         self.assertEqual(icon.get_size(), (16, 8))
         self.assertFalse(icon.get_flags() & pygame.SRCALPHA)
         self.assertEqual(tuple(icon.get_at((8, 4))), (10, 20, 30, 255))  # opaque pixels, read back as RGBA
+
+    def test_gui_window_icon_fallback_keeps_palette_alpha(self):
+        """A palette (P-mode) icon with a tRNS chunk must keep its transparency via the Pillow fallback."""
+        from unittest.mock import patch
+        from pathlib import Path
+        from PIL import Image
+        import pygame
+        import eigencube_gui
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            img_dir = os.path.join(tmp_dir, "img")
+            os.makedirs(img_dir)
+            palette = Image.new("P", (8, 4))
+            palette.putpalette([255, 0, 0, 0, 255, 0] + [0, 0, 0] * 254)
+            palette.putpixel((1, 0), 1)  # the only opaque-colored-and-transparent index
+            palette.info["transparency"] = 1
+            palette.save(os.path.join(img_dir, "icon.png"))
+            original_repo_dir = eigencube_gui.REPO_DIR
+            eigencube_gui.REPO_DIR = Path(tmp_dir)
+            try:
+                with patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
+                    icon = eigencube_gui.load_window_icon()
+            finally:
+                eigencube_gui.REPO_DIR = original_repo_dir
+        self.assertTrue(icon.get_flags() & pygame.SRCALPHA)
+        self.assertEqual(tuple(icon.get_at((0, 0))), (255, 0, 0, 255))
+        self.assertEqual(tuple(icon.get_at((1, 0))), (0, 255, 0, 0))
 
     def test_gui_frame_saves_without_sdl_image(self):
         """Frames must save even when pygame can only decode BMP (no SDL_image), via the Pillow fallback."""
