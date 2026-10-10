@@ -18,8 +18,6 @@ end
 type vec = Vec.t [@@deriving compare, sexp]
 type mat = vec * vec * vec [@@deriving compare, sexp]
 type move = { normal : vec; dir : int } [@@deriving compare, sexp]
-
-(* 26 cubelets, each mapped from canonical position to current 3x3 rotation *)
 type cube = mat Map.M(Vec).t
 
 let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
@@ -110,8 +108,6 @@ let reconstruct came_from dst =
   in
   (dst, loop dst [])
 
-(* Prune branches that immediately invert the previous move, or that apply
-   commuting moves on opposite faces (e.g. L R vs R L) in non-canonical order. *)
 let should_prune last_move move =
   match last_move with
   | None -> false
@@ -194,41 +190,31 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
   if is_goal start then Some (start, []) else attempt max_moves
 
 (* Single-cubelet distance heuristics via unified A* search *)
-let dist_solved_cache = Hashtbl.Poly.create ()
-
-let min_moves_to_solved c r =
-  Hashtbl.find_or_add dist_solved_cache (c, r) ~default:(fun () ->
+let cubelet_dist cache ~is_goal c r =
+  Hashtbl.find_or_add cache (c, r) ~default:(fun () ->
       match
-        astar ~start:r ~is_goal:(is_cubelet_solved c)
-          ~apply_move:(fun m r -> rot_mat m *@* r)
-          ()
+        astar ~start:r ~is_goal ~apply_move:(fun m r -> rot_mat m *@* r) ()
       with
       | Some (_, path) -> List.length path
       | None -> 0
   )
 
+let dist_solved_cache = Hashtbl.Poly.create ()
 let dist_pos_cache = Hashtbl.Poly.create ()
 
-let min_moves_to_pos c r =
-  Hashtbl.find_or_add dist_pos_cache (c, r) ~default:(fun () ->
-      match
-        astar ~start:r ~is_goal:(is_cubelet_pos_solved c)
-          ~apply_move:(fun m r -> rot_mat m *@* r)
-          ()
-      with
-      | Some (_, path) -> List.length path
-      | None -> 0
-  )
+let min_moves_to_solved c r =
+  cubelet_dist dist_solved_cache ~is_goal:(is_cubelet_solved c) c r
 
+let min_moves_to_pos c r =
+  cubelet_dist dist_pos_cache ~is_goal:(is_cubelet_pos_solved c) c r
+
+let dist_solved c cube = min_moves_to_solved c (Map.find_exn cube c)
 let top_cubelets = List.filter cubelets ~f:(fun (_, _, z) -> z = 1)
 let middle_belt_cubelets = List.filter cubelets ~f:(fun (_, _, z) -> z = 0)
 let middle_cubelets = top_cubelets @ middle_belt_cubelets
 
 let bottom_edges =
-  List.filter cubelets ~f:(fun c ->
-      let _, _, z = c in
-      not (z = -1 && norm1 c = 3)
-  )
+  List.filter cubelets ~f:(fun ((_, _, z) as c) -> not (z = -1 && norm1 c = 3))
 
 let bottom_cubelets = List.filter cubelets ~f:(fun (_, _, z) -> z = -1)
 
@@ -241,50 +227,42 @@ let norm_p05 group ~f =
   sum *. sum
 
 let top_layer_heuristic (cube : cube) =
-  norm_p05 top_cubelets ~f:(fun c -> min_moves_to_solved c (Map.find_exn cube c))
-  /. 8.0
+  norm_p05 top_cubelets ~f:(fun c -> dist_solved c cube) /. 8.0
 
 let middle_layer_heuristic (cube : cube) =
-  norm_p05 middle_cubelets ~f:(fun c ->
-      min_moves_to_solved c (Map.find_exn cube c)
-  )
-  /. 4.0
+  norm_p05 middle_cubelets ~f:(fun c -> dist_solved c cube) /. 4.0
 
 let bottom_layer_edge_heuristic (cube : cube) =
-  norm_p05 bottom_edges ~f:(fun c -> min_moves_to_solved c (Map.find_exn cube c))
-  /. 3.0
+  norm_p05 bottom_edges ~f:(fun c -> dist_solved c cube) /. 3.0
 
 let bottom_layer_corner_heuristic (cube : cube) =
-  norm_p05 top_cubelets ~f:(fun c -> min_moves_to_solved c (Map.find_exn cube c))
-  /. 5.0
-  +. norm_p05 middle_belt_cubelets ~f:(fun c ->
-         min_moves_to_solved c (Map.find_exn cube c)
-     )
-     /. 3.0
+  (norm_p05 top_cubelets ~f:(fun c -> dist_solved c cube) /. 5.0)
+  +. (norm_p05 middle_belt_cubelets ~f:(fun c -> dist_solved c cube) /. 3.0)
   +. norm_p05 bottom_cubelets ~f:(fun c ->
-         if norm1 c = 3 then min_moves_to_pos c (Map.find_exn cube c)
-         else min_moves_to_solved c (Map.find_exn cube c)
+         let r = Map.find_exn cube c in
+         if norm1 c = 3 then min_moves_to_pos c r else min_moves_to_solved c r
      )
      /. 8.0
 
-let count_solved ~f (cube : cube) =
+let count_matching ~f (cube : cube) =
   Map.fold cube ~init:0 ~f:(fun ~key:c ~data:r acc ->
-      if f c && is_cubelet_solved c r then acc + 1 else acc
+      if f c r then acc + 1 else acc
   )
 
-let count_bottom_edges_positioned (cube : cube) =
-  Map.fold cube ~init:0 ~f:(fun ~key:c ~data:r acc ->
-      let _, _, z = c in
-      if z = -1 && norm1 c = 2 && r *@ (0, 0, -1) = (0, 0, -1) then acc + 1
-      else acc
+let count_solved ~f = count_matching ~f:(fun c r -> f c && is_cubelet_solved c r)
+
+let count_bottom_edges_positioned =
+  count_matching ~f:(fun ((_, _, z) as c) r ->
+      z = -1 && norm1 c = 2 && r *@ (0, 0, -1) = (0, 0, -1)
   )
 
-let count_bottom_corners_positioned (cube : cube) =
-  Map.fold cube ~init:0 ~f:(fun ~key:c ~data:r acc ->
-      let _, _, z = c in
-      if z = -1 && norm1 c = 3 && is_cubelet_pos_solved c r then acc + 1
-      else acc
+let count_bottom_corners_positioned =
+  count_matching ~f:(fun ((_, _, z) as c) r ->
+      z = -1 && norm1 c = 3 && is_cubelet_pos_solved c r
   )
+
+let is_top_edge ((_, _, z) as v) = z = 1 && norm1 v = 2
+let is_bottom_edge ((_, _, z) as v) = z = -1 && norm1 v = 2
 
 let solve_layer ~name ~total ~is_goal ~heuristic ~random_weight cube =
   let rec loop i curr moves_acc =
@@ -314,18 +292,8 @@ let solve_endgame cube =
   let left = { normal = (0, -1, 0); dir = 1 } in
   let top = { normal = (0, 0, 1); dir = 1 } in
   let bottom = { normal = (0, 0, -1); dir = 1 } in
-  let routine =
-    [
-      invert_move left;
-      invert_move top;
-      left;
-      top;
-      invert_move left;
-      invert_move top;
-      left;
-      top;
-    ]
-  in
+  let cycle = [ invert_move left; invert_move top; left; top ] in
+  let routine = cycle @ cycle in
   let apply (c, sol) m = (apply_move m c, m :: sol) in
   let apply_all state mvs = List.fold mvs ~init:state ~f:apply in
   let is_corner_oriented c =
@@ -366,13 +334,7 @@ let solve (cube : cube) =
   let c1, s1 =
     solve_layer ~name:"solving cubelet" ~total:17
       ~is_goal:(fun i c ->
-        count_solved
-          ~f:(fun v ->
-            let _, _, z = v in
-            z = 1 && norm1 v = 2
-          )
-          c
-        >= Int.min 4 (i + 1)
+        count_solved ~f:is_top_edge c >= Int.min 4 (i + 1)
         && count_solved ~f:(fun (_, _, z) -> z = 1) c >= Int.min 9 (i + 1)
         && count_solved ~f:(fun (_, _, z) -> z >= 0) c >= Int.min 17 (i + 1)
       )
@@ -387,13 +349,7 @@ let solve (cube : cube) =
       ~is_goal:(fun i c ->
         count_solved ~f:(fun (_, _, z) -> z >= 0) c = 17
         && count_bottom_edges_positioned c >= Int.min 4 (i + 1)
-        && count_solved
-             ~f:(fun v ->
-               let _, _, z = v in
-               z = -1 && norm1 v = 2
-             )
-             c
-           >= Int.min 4 (i - 3)
+        && count_solved ~f:is_bottom_edge c >= Int.min 4 (i - 3)
       )
       ~heuristic:(fun _ -> bottom_layer_edge_heuristic)
       ~random_weight:0.25 c1
@@ -403,13 +359,7 @@ let solve (cube : cube) =
     solve_layer ~name:"positioning bottom corners" ~total:4
       ~is_goal:(fun i c ->
         count_solved ~f:(fun (_, _, z) -> z >= 0) c = 17
-        && count_solved
-             ~f:(fun v ->
-               let _, _, z = v in
-               z = -1 && norm1 v = 2
-             )
-             c
-           = 4
+        && count_solved ~f:is_bottom_edge c = 4
         && count_bottom_corners_positioned c >= Int.min 4 (i + 1)
       )
       ~heuristic:(fun _ -> bottom_layer_corner_heuristic)
