@@ -92,12 +92,11 @@ let log fmt =
   printf "[%02d:%02d:%02d] " tm.tm_hour tm.tm_min tm.tm_sec;
   printf (Stdlib.( ^^ ) fmt "\n%!")
 
-(* Central Limit Theorem: sum of 12 uniform random floats has mean 6.0 and variance 1.0 *)
+(* Central Limit Theorem: sum of 12 uniform random floats has exact mean 6.0 and variance 1.0 *)
 let random_gauss ~mean ~stdev =
-  let sum =
-    List.init 12 ~f:(fun _ -> Random.float 1.0) |> List.fold ~init:0.0 ~f:( +. )
-  in
-  mean +. (stdev *. (sum -. 6.0))
+  List.init 12 ~f:(fun _ -> Random.float 1.0)
+  |> List.fold ~init:0.0 ~f:( +. )
+  |> fun sum -> mean +. (stdev *. (sum -. 6.0))
 
 (* Multi-phase A* search with move-budgeted restarts (1.5x expansion) *)
 let astar (type state) ~(start : state) ~(is_goal : state -> bool)
