@@ -259,7 +259,7 @@ let solve_layer ~name ~total ~is_goal ~heuristic ~random_weight cube =
 let bottom_left_front_corner (cube : cube) =
   List.find_exn cube ~f:(fun (c, r) -> r *@ c = (1, -1, -1))
 
-(* Endgame: orient bottom corners using (R' D' R D) * 2/4 and align bottom face *)
+(* Endgame: orient bottom corners using (L' U' L U) * 2/4 and align bottom face *)
 let solve_endgame cube =
   let left = { normal = (0, -1, 0); dir = 1 } in
   let top = { normal = (0, 0, 1); dir = 1 } in
