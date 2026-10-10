@@ -112,12 +112,10 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
     ~(apply_move : move -> state -> state) ?(heuristic = fun _ -> 0.0)
     ?(random_weight = 0.0) ?(max_moves = 100_000) () =
   let visited = Hashtbl.Poly.create ~size:65536 () in
-  let empty_frontier =
-    Fheap.create ~compare:(fun a b -> Float.compare a.prio b.prio)
-  in
   let start_frontier =
-    Fheap.add empty_frontier
-      { prio = 0.0; cost = 0; last_move = None; state = start }
+    Fheap.create ~compare:(fun a b -> Float.compare a.prio b.prio)
+    |> fun empty ->
+    Fheap.add empty { prio = 0.0; cost = 0; last_move = None; state = start }
   in
   let rec attempt budget =
     Hashtbl.clear visited;
