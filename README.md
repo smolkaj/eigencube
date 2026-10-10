@@ -97,7 +97,7 @@ cd eigencube
 python3 -m venv eigencube_env
 source eigencube_env/bin/activate
 
-# Install dependencies (numpy, pygame, opencv-python, Pillow)
+# Install dependencies (numpy, pygame, Pillow)
 pip install -r requirements.txt
 ```
 
@@ -120,9 +120,8 @@ docker run --rm eigencube python eigencube.py
 docker run --rm eigencube python eigencube.py 123
 ```
 
-The image uses Pygame's headless video driver. The interactive GUI and physical
-camera scanner are better run from the virtual environment because they require
-access to the host display and camera.
+The image uses Pygame's headless video driver. The interactive GUI is better
+run from the virtual environment because it requires access to the host display.
 
 ---
 
@@ -207,7 +206,6 @@ The test suite covers:
 eigencube/
 ├── eigencube.py            # Core solver & linear algebra model (< 400 lines, canonical)
 ├── eigencube_gui.py        # Pygame GUI with animated moves & step playback
-├── eigencube_scanner.py    # Computer vision scanner for physical cubes (OpenCV)
 ├── explainer/              # Animated video explainer of the encoding (Manim)
 ├── ocaml/                  # Minimalistic OCaml port (< 400 lines)
 ├── scripts/
@@ -224,7 +222,7 @@ eigencube/
 │   ├── icon.png            # GUI window icon
 │   └── social-preview.png
 ├── fonts/              # Roboto, for the GUI and the logo generator
-├── requirements.txt    # numpy, pygame, opencv-python, Pillow
+├── requirements.txt    # numpy, pygame, Pillow
 └── README.md
 ```
 
@@ -232,7 +230,7 @@ eigencube/
 
 ## Language Ports
 
-While [`eigencube.py`](eigencube.py) is the canonical reference implementation powering the visualizer and scanner, Eigencube welcomes self-contained ports of the core mathematical solver to other programming languages.
+While [`eigencube.py`](eigencube.py) is the canonical reference implementation powering the visualizer, Eigencube welcomes self-contained ports of the core mathematical solver to other programming languages.
 
 Each port lives in its own top-level directory named after the language:
 - [`ocaml/`](ocaml/): A self-contained, typed functional pearl in OCaml (< 400 lines) using immutable maps and $SO(3, \mathbb{Z})$ linear algebra.
