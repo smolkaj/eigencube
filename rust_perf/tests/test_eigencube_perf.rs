@@ -10,94 +10,96 @@ fn test_counts_and_group_size() {
 }
 
 #[test]
-fn test_cubelet_index_groups() {
-  for (i, &c) in CUBELETS.iter().enumerate() {
-    assert_eq!(TOP_CUBELETS.contains(&i), c.2 == 1, "mismatch on TOP_CUBELETS for index {}", i);
-    assert_eq!(MID_LAYER_CUBELETS.contains(&i), c.2 == 0, "mismatch on MID_LAYER_CUBELETS for index {}", i);
-    assert_eq!(MID_CUBELETS.contains(&i), c.2 >= 0, "mismatch on MID_CUBELETS for index {}", i);
-    assert_eq!(BOT_CUBELETS.contains(&i), c.2 == -1, "mismatch on BOT_CUBELETS for index {}", i);
-    assert_eq!(TOP_EDGE_CUBELETS.contains(&i), c.is_top_edge(), "mismatch on TOP_EDGE_CUBELETS for index {}", i);
-    assert_eq!(
-      BOTTOM_EDGE_CUBELETS.contains(&i),
-      c.is_bottom_edge(),
-      "mismatch on BOTTOM_EDGE_CUBELETS for index {}",
-      i
-    );
-    assert_eq!(
-      BOTTOM_CORNER_CUBELETS.contains(&i),
-      c.is_bottom_corner(),
-      "mismatch on BOTTOM_CORNER_CUBELETS for index {}",
-      i
-    );
-    assert_eq!(
-      NON_BOTTOM_CORNER_CUBELETS.contains(&i),
-      !c.is_bottom_corner(),
-      "mismatch on NON_BOTTOM_CORNER_CUBELETS for index {}",
-      i
-    );
-  }
+fn test_linear_algebra_invariants() {
+  let c = Vec3(1, 1, 1);
+  assert!(is_cubelet_solved(c, Mat3::ID));
+  let rot_x = MOVES[0].rot_mat();
+  assert!(!is_cubelet_solved(c, rot_x));
+  assert_eq!(Vec3(1, 0, 0).dot(Vec3(0, 1, 0)), 0);
+  assert_eq!(Vec3(1, 2, 3).dot(Vec3(4, 5, 6)), 32);
+}
+
+#[test]
+fn test_fast_cube_roundtrip() {
+  let c0 = SOLVED_CUBE;
+  let fast_cube = FastCube::from_cube(&c0);
+  assert_eq!(fast_cube, FastCube::SOLVED);
+  assert_eq!(fast_cube.to_cube(), c0);
+
+  let scrambled = shuffle(50, 42, c0);
+  let fast_scrambled = FastCube::from_cube(&scrambled);
+  assert_eq!(fast_scrambled.to_cube(), scrambled);
 }
 
 #[test]
 fn test_4x_single_move_identity() {
-  let tables = Tables::get();
-  let c0 = SOLVED_CUBE;
+  let c0 = FastCube::SOLVED;
   for m in 0..12 {
-    let c1 = apply_move(tables, m, &c0);
-    let c2 = apply_move(tables, m, &c1);
-    let c3 = apply_move(tables, m, &c2);
-    let c4 = apply_move(tables, m, &c3);
-    assert!(is_cube_solved(tables, &c4));
-    assert!(!is_cube_solved(tables, &c1));
-    assert!(!is_cube_solved(tables, &c2));
-    assert!(!is_cube_solved(tables, &c3));
+    let c1 = c0.apply_move(m);
+    let c2 = c1.apply_move(m);
+    let c3 = c2.apply_move(m);
+    let c4 = c3.apply_move(m);
+    assert!(c4.is_solved());
+    assert!(!c1.is_solved());
+    assert!(!c2.is_solved());
+    assert!(!c3.is_solved());
   }
 }
 
 #[test]
 fn test_inverse_move_cancellation() {
-  let tables = Tables::get();
-  let c0 = SOLVED_CUBE;
+  let c0 = FastCube::SOLVED;
   for m in 0..12 {
     let inv_m = m ^ 1;
-    let c_after = apply_move(tables, inv_m, &apply_move(tables, m, &c0));
-    assert!(is_cube_solved(tables, &c_after));
+    let c_after = c0.apply_move(m).apply_move(inv_m);
+    assert!(c_after.is_solved());
   }
 }
 
 #[test]
 fn test_6x_sexy_move_identity() {
-  let tables = Tables::get();
   let r_idx = MOVES.iter().position(|&m| m.normal == Vec3(0, 1, 0) && m.dir == 1).unwrap();
   let u_idx = MOVES.iter().position(|&m| m.normal == Vec3(0, 0, 1) && m.dir == 1).unwrap();
   let sexy = [r_idx, u_idx, r_idx ^ 1, u_idx ^ 1];
 
-  let mut c = SOLVED_CUBE;
+  let mut c = FastCube::SOLVED;
   for _ in 0..6 {
     for &m in &sexy {
-      c = apply_move(tables, m, &c);
+      c = c.apply_move(m);
     }
   }
-  assert!(is_cube_solved(tables, &c));
+  assert!(c.is_solved());
 }
 
 #[test]
 fn test_deterministic_budget_exhaustion() {
-  let tables = Tables::get();
-  let c0 = SOLVED_CUBE;
-  let result = astar(tables, c0, |_| false, |_| 0.0, 0.0, 10);
+  let c0 = FastCube::SOLVED;
+  let result = astar(c0, |_| false, |_| 0.0, 0.0, 10);
   assert!(result.is_none());
 }
 
 #[test]
 fn test_full_scramble_solve() {
-  let tables = Tables::get();
   let scrambled = shuffle(100, 42, SOLVED_CUBE);
   let moves = solve(scrambled);
-  let mut curr = scrambled;
+  let mut curr = FastCube::from_cube(&scrambled);
   for m in &moves {
     let m_idx = MOVES.iter().position(|x| x == m).unwrap();
-    curr = apply_move(tables, m_idx, &curr);
+    curr = curr.apply_move(m_idx);
   }
-  assert!(is_cube_solved(tables, &curr));
+  assert!(curr.is_solved());
+}
+
+#[test]
+fn test_successive_solves_independent() {
+  for seed in [1, 2] {
+    let scrambled = shuffle(50, seed, SOLVED_CUBE);
+    let moves = solve(scrambled);
+    let mut curr = FastCube::from_cube(&scrambled);
+    for m in &moves {
+      let m_idx = MOVES.iter().position(|x| x == m).unwrap();
+      curr = curr.apply_move(m_idx);
+    }
+    assert!(curr.is_solved());
+  }
 }
