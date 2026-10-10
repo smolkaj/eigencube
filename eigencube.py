@@ -11,6 +11,7 @@ import numpy as np
 import heapq
 import random
 import functools
+import itertools
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import Any
@@ -133,7 +134,7 @@ def apply_move_to_cube(move, cube):
   )
 
 def shuffle(cube, iterations=100_000, seed=42):
-  if seed: random.seed(seed)
+  if seed is not None: random.seed(seed)
   for _ in range(iterations):
     move = moves[random.randrange(len(moves))]
     cube = apply_move_to_cube(move, cube)
@@ -153,51 +154,53 @@ class PrioritizedItem:
   item: Any = field(compare=False)
   priority: int
 
-def astar(start, is_goal, apply_move, heuristic = lambda _: 0,
-          get_moves = lambda _: moves, random_weight=0, max_moves=100_000):
+# A search step is a sequence of moves: a single move, or a learned macro.
+single_move_steps = tuple((move,) for move in moves)
+
+def inverse_step(step): return tuple(inverse_move(move) for move in reversed(step))
+
+def astar(start, is_goal, apply_step, heuristic = lambda _: 0,
+          get_steps = lambda _: single_move_steps, random_weight=0, max_expansions=10_000):
   if is_goal(start): return (start, ())
-  budget = max_moves
+  budget = max_expansions
 
   def reconstruct_solution(dst):
     path, current = [], dst
     while current in came_from:
-      src, move = came_from[current]
-      path.append(move)
+      src, step = came_from[current]
+      path.append(step)
       current = src
     return (dst, tuple(reversed(path)))
 
   while True:
     frontier = [PrioritizedItem(start, 0)]
     came_from, cost_so_far = {}, { start : 0 }
-    moves_simulated = 0
-    budget_exceeded = False
+    expansions = 0
 
-    while frontier:
+    # The budget counts expanded states, not generated ones, so that it measures
+    # search progress independently of how many steps are known.
+    while frontier and expansions < budget:
+      expansions += 1
       src = heapq.heappop(frontier).item
-      last_move = came_from[src][1] if src in came_from else None
-      for move in get_moves(src):
-        # Never immediately undo the move just taken.
-        if last_move:
-          if move == inverse_move(last_move): continue
+      last_step = came_from[src][1] if src in came_from else None
+      for step in get_steps(src):
+        if last_step:
+          # Never immediately undo the step just taken.
+          if step == inverse_step(last_step): continue
           # Opposite face moves commute; prune duplicate branches by enforcing canonical order.
-          if last_move[0] > move[0] and (-last_move[0][0], -last_move[0][1], -last_move[0][2]) == move[0]: continue
-        dst, cost = apply_move(move, src), cost_so_far[src] + 1
-        moves_simulated += 1
-        budget_exceeded = budget is not None and moves_simulated >= budget
-        if dst in cost_so_far and cost_so_far[dst] <= cost:
-          if budget_exceeded: break
-          continue
-        cost_so_far[dst], came_from[dst] = cost, (src, move)
+          if len(step) == len(last_step) == 1:
+            (last_axis, _), (axis, _) = last_step[0], step[0]
+            if last_axis > axis and tuple(-x for x in last_axis) == axis: continue
+        dst, cost = apply_step(step, src), cost_so_far[src] + len(step)
+        if dst in cost_so_far and cost_so_far[dst] <= cost: continue
+        cost_so_far[dst], came_from[dst] = cost, (src, step)
         if is_goal(dst): return reconstruct_solution(dst)
-        if budget_exceeded: break
         h_weight = random.gauss(1, random_weight) if RANDOMIZE_SEARCH else 1
         priority = cost + h_weight * heuristic(dst)
         heapq.heappush(frontier, PrioritizedItem(dst, priority))
-      if budget_exceeded:
-        break
-    if not budget_exceeded or budget is None or random_weight == 0 or not RANDOMIZE_SEARCH:
+    if not frontier or random_weight == 0 or not RANDOMIZE_SEARCH:
       return None
-    print("search budget of %d moves exceeded; restarting" % budget)
+    print("search budget of %d expansions exceeded; restarting" % budget)
     budget = max(int(1.5 * budget), budget + 1)
 
 @functools.cache
@@ -211,18 +214,21 @@ def is_cube_solved(cube): return all(is_cubelet_solved(c, r) for c, r in cube)
 def num_solved_with_criterion(cube, criterion):
   return sum(is_cubelet_solved(c, r) for c,r in cube if criterion(c))
 
+# Rotates an isolated cubelet by a single-move step, as if no other cubelets were in the way.
+def rotate_freely(step, rotation):
+  (move,) = step
+  return tupled(rotation_matrix(move) @ rotation)
+
 @functools.cache
 def min_moves_to_solved(cubelet, rotation):
   def is_dst(r): return is_cubelet_solved(cubelet, r)
-  def apply_move(m, r): return tupled(rotation_matrix(m) @ r)
-  _, path = astar(rotation, is_dst, apply_move)
+  _, path = astar(rotation, is_dst, rotate_freely)
   return len(path)
 
 @functools.cache
 def min_moves_to_position(cubelet, rotation):
   def is_dst(r): return position(cubelet, r) == cubelet
-  def apply_move(m, r): return tupled(rotation_matrix(m) @ r)
-  _, path = astar(rotation, is_dst, apply_move)
+  _, path = astar(rotation, is_dst, rotate_freely)
   return len(path)
 
 def top_layer_heuristic(cube):
@@ -253,23 +259,42 @@ def is_top_edge(cubelet): return cubelet[2] == 1 and norm1(cubelet) == 2
 def is_top_cubelet(cubelet): return cubelet[2] == 1
 def is_top_or_middle_cubelet(cubelet): return cubelet[2] >= 0
 
+# The steps the solver searches over: for each effect on the solved cube, the
+# shortest known move sequence achieving it. Beyond single moves, the solver
+# learns macros from its own searches: sequences that disturb only a few
+# cubelets (commutators, as it turns out). Nothing about them is hard-coded.
+MAX_MACRO_DISTURBANCE = 12
+steps = {}
 
-def solve_top_and_middle_layer(cube, report_progress_callback):
-  solution_moves = ()
-  for num_solved in range(17):
-    report_progress_callback(cube)
-    print("solving cubelet #%d" % (num_solved + 1))
-    def is_goal(cube): return (
-      num_solved_with_criterion(cube, is_top_edge) >= min(4, num_solved + 1) and
-      num_solved_with_criterion(cube, is_top_cubelet) >= min(9, num_solved + 1) and
-      num_solved_with_criterion(cube, is_top_or_middle_cubelet) >= min(17, num_solved + 1)
-    )
-    heuristic = top_layer_heuristic if num_solved < 9 else middle_layer_heuristic
-    cube, next_moves = astar(cube, is_goal, apply_move_to_cube,
-                             heuristic, random_weight=0.25)
-    print("-> found solution with %d moves" % len(next_moves))
-    solution_moves += next_moves
-  return (cube, solution_moves)
+# The 48 symmetries of the cube: signed permutation matrices.
+symmetries = [np.diag(signs) @ np.identity(3)[list(permutation)]
+              for permutation in itertools.permutations(range(3))
+              for signs in itertools.product((-1, 1), repeat=3)]
+
+@functools.cache
+def apply_step_to_cubelet_rotation(step, cubelet, rotation):
+  for move in step: rotation = apply_move_to_cubelet_rotation(move, cubelet, rotation)
+  return rotation
+
+def apply_step_to_cube(step, cube):
+  return tuple((c, apply_step_to_cubelet_rotation(step, c, r)) for c, r in cube)
+
+def num_disturbed(cube): return sum(not is_cubelet_solved(c, r) for c, r in cube)
+
+def symmetric_move(symmetry, move):
+  # Conjugating a slice rotation by a symmetry yields the rotation of the image slice.
+  rotation = symmetry @ rotation_matrix(move) @ symmetry.T
+  return next(m for m in moves if np.array_equal(rotation_matrix(m), rotation) and
+              m[0] == tuple(int(x) for x in symmetry @ move[0]))
+
+def learn_step(sequence):
+  if not 0 < num_disturbed(apply_step_to_cube(sequence, solved_cube)) <= MAX_MACRO_DISTURBANCE: return
+  for symmetry, variant in itertools.product(symmetries, (sequence, inverse_step(sequence))):
+    step = tuple(symmetric_move(symmetry, move) for move in variant)
+    effect = apply_step_to_cube(step, solved_cube)
+    if effect not in steps or len(step) < len(steps[effect]): steps[effect] = step
+
+for step in single_move_steps: learn_step(step)
 
 def is_bottom_edge(cubelet): return cubelet[2] == -1 and norm1(cubelet) == 2
 def is_bottom_corner(cubelet): return cubelet[2] == -1 and norm1(cubelet) == 3
@@ -281,91 +306,74 @@ def num_bottom_edges_positioned(cube):
 def num_bottom_corners_positioned(cube):
   return sum(is_bottom_corner(c) and is_in_right_place(c, r) for c, r in cube)
 
-def solve_bottom_layer_edges(cube, report_progress_callback):
-  solution_moves = ()
-  for i in range(8):
-    report_progress_callback(cube)
-    print("solving bottom cross #%d" % (i + 1))
-    def is_goal(cube): return (
-      num_solved_with_criterion(cube, is_top_or_middle_cubelet) == 17 and
-      num_bottom_edges_positioned(cube) >= min(4, i + 1) and
-      num_solved_with_criterion(cube, is_bottom_edge) >= min(4, i - 3)
-    )
-    cube, next_moves = astar(cube, is_goal, apply_move_to_cube,
-                             bottom_layer_edge_heuristic, random_weight=0.25)
-    print("-> found solution with %d moves" % len(next_moves))
-    solution_moves += next_moves
-  return (cube, solution_moves)
+# Each phase solves a few more cubelets per step, keeping the ones already solved.
+def top_layer_goal(cube, i): return (
+  num_solved_with_criterion(cube, is_top_edge) >= min(4, i + 1) and
+  num_solved_with_criterion(cube, is_top_cubelet) >= i + 1)
+def middle_layer_goal(cube, i): return (
+  num_solved_with_criterion(cube, is_top_cubelet) == 9 and
+  num_solved_with_criterion(cube, is_top_or_middle_cubelet) >= 10 + i)
+def bottom_cross_goal(cube, i): return (
+  num_solved_with_criterion(cube, is_top_or_middle_cubelet) == 17 and
+  num_bottom_edges_positioned(cube) >= min(4, i + 1) and
+  num_solved_with_criterion(cube, is_bottom_edge) >= min(4, i - 3))
+def bottom_corner_positions_goal(cube, i): return (
+  num_solved_with_criterion(cube, is_top_or_middle_cubelet) == 17 and
+  num_solved_with_criterion(cube, is_bottom_edge) == 4 and
+  num_bottom_corners_positioned(cube) >= i + 1)
 
-def solve_bottom_layer_corners(cube, report_progress_callback):
-  solution_moves = ()
-  for i in range(4):
-    report_progress_callback(cube)
-    print("positioning bottom corners #%d" % (i + 1))
-    def is_goal(cube): return (
-      num_solved_with_criterion(cube, is_top_or_middle_cubelet) == 17 and
-      num_solved_with_criterion(cube, is_bottom_edge) == 4 and
-      num_bottom_corners_positioned(cube) >= min(4, i + 1)
-    )
-    cube, next_moves = astar(cube, is_goal, apply_move_to_cube,
-                             bottom_layer_corner_heuristic, random_weight=0.3)
-    print("-> found solution with %d moves" % len(next_moves))
-    solution_moves += next_moves
-  return (cube, solution_moves)
+phases = (  # (description, number of steps, goal, heuristic, random weight)
+  ("solving top layer", 9, top_layer_goal, top_layer_heuristic, 0.25),
+  ("solving middle layer", 8, middle_layer_goal, middle_layer_heuristic, 0.25),
+  ("solving bottom cross", 8, bottom_cross_goal, bottom_layer_edge_heuristic, 0.25),
+  ("positioning bottom corners", 4, bottom_corner_positions_goal, bottom_layer_corner_heuristic, 0.3),
+)
 
-def bottom_left_front_corner(cube):
-  return next((c,r) for c,r in cube if position(c, r) == (1, -1, -1))
-
+# Twists each bottom corner in place with a fixed routine, then aligns the bottom layer.
 def solve_endgame(cube, report_progress_callback):
-  solution = []
   left, top, bottom = ((0, -1, 0), 1), ((0, 0, 1), 1), ((0, 0, -1), 1)
-  routine = 2 * (inverse_move(left), inverse_move(top), left, top)
+  twist = 2 * (inverse_move(left), inverse_move(top), left, top)
+  solution = ()
 
-  def apply(move):
-    nonlocal cube
-    solution.append(move)
-    cube = apply_move_to_cube(move, cube)
-
-  def is_corner_oriented():
-    c, r = bottom_left_front_corner(cube)
-    for _ in range(4):
-      if is_cubelet_solved(c, r): return True
-      r = apply_move_to_cubelet_rotation(bottom, c, r)
-    return False
+  def is_front_corner_oriented(cube):
+    c, r = next((c, r) for c, r in cube if position(c, r) == (1, -1, -1))
+    return any(is_cubelet_solved(c, apply_step_to_cubelet_rotation(k * (bottom,), c, r)) for k in range(4))
 
   for _ in range(4):
     report_progress_callback(cube)
-    while not is_corner_oriented():
-      for move in routine: apply(move)
-    apply(bottom)
-
-  while not is_cube_solved(cube): apply(bottom)
-  return (cube, tuple(solution))
+    while not is_front_corner_oriented(cube):
+      cube, solution = apply_step_to_cube(twist, cube), solution + twist
+    cube, solution = apply_move_to_cube(bottom, cube), solution + (bottom,)
+  while not is_cube_solved(cube):
+    cube, solution = apply_move_to_cube(bottom, cube), solution + (bottom,)
+  return (cube, solution)
 
 def solve(cube, report_progress_callback=lambda cube: None):
-  cube, solution1 = solve_top_and_middle_layer(cube, report_progress_callback)
-  print(50 * "-")
-  cube, solution2 = solve_bottom_layer_edges(cube, report_progress_callback)
-  print(50 * "-")
-  cube, solution3 = solve_bottom_layer_corners(cube, report_progress_callback)
-  print(50 * "-")
-  cube, solution4 = solve_endgame(cube, report_progress_callback)
-  solution = solution1 + solution2 + solution3 + solution4
-  print("Solved cube in %d moves. Final cube:" % len(solution))
-  # print(describe_cube(cube))
+  solution = ()
+  for description, num_steps, goal, heuristic, random_weight in phases:
+    for i in range(num_steps):
+      report_progress_callback(cube)
+      print("%s #%d" % (description, i + 1))
+      known_steps = tuple(steps.values())
+      cube, path = astar(cube, lambda cube: goal(cube, i), apply_step_to_cube, heuristic,
+                         lambda _: known_steps, random_weight)
+      next_moves = sum(path, ())
+      print("-> found solution with %d moves (%d steps known)" % (len(next_moves), len(steps)))
+      learn_step(next_moves)
+      solution += next_moves
+    print(50 * "-")
+  cube, endgame_moves = solve_endgame(cube, report_progress_callback)
+  solution += endgame_moves
+  print("Solved cube in %d moves." % len(solution))
   print("is_cube_solved: ", is_cube_solved(cube))
-  print("cube == solved_cube: ", cube == solved_cube)
   return solution
 
 def print_stats():
   secs_elapsed = (datetime.now() - STARTUP_TIME).total_seconds()
-  cache_info = apply_move_to_cubelet_rotation.cache_info()
-  moves = (cache_info.hits + cache_info.misses) / len(solved_cube)
+  cache_info = apply_step_to_cubelet_rotation.cache_info()
+  steps_simulated = (cache_info.hits + cache_info.misses) / NUM_CUBELETS
   print("- time elapsed: %.1f sec" % secs_elapsed)
-  print("- moves simulated: %d (%.0f moves/sec) " % (
-    moves,
-    moves / secs_elapsed
-  ))
+  print("- steps simulated: %d (%.0f steps/sec) " % (steps_simulated, steps_simulated / secs_elapsed))
   cache_info = min_moves_to_solved.cache_info()
   print("- min moves to solved calculations: ", cache_info.hits + cache_info.misses)
 

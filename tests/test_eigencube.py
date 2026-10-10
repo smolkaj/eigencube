@@ -15,6 +15,7 @@ from eigencube import (
     is_cube_solved,
     solve,
     astar,
+    apply_step_to_cube,
     norm1,
     rotation_matrix,
     inverse_move,
@@ -133,6 +134,16 @@ class TestEigencube(unittest.TestCase):
         self.assertNotEqual(cube_a, cube_c)
         self.assertFalse(is_cube_solved(cube_a))
 
+    def test_every_seed_reproduces_its_scramble(self):
+        """Every seed, including falsy 0, must pin the scramble regardless of prior random state."""
+        import random
+        from eigencube import shuffle
+        for seed in range(5):
+            cube_a = shuffle(solved_cube, iterations=20, seed=seed)
+            random.random()  # Advance the global generator between the two shuffles.
+            cube_b = shuffle(solved_cube, iterations=20, seed=seed)
+            self.assertEqual(cube_a, cube_b, f"seed={seed} is not reproducible")
+
     def test_descriptions(self):
         """Verify describe_vector, describe_move, and describe_cubelet_type."""
         from eigencube import describe_vector, describe_move, describe_cubelet_type
@@ -152,19 +163,19 @@ class TestEigencube(unittest.TestCase):
         )
 
     def test_astar_budget_exhaustion(self):
-        """When random_weight=0, exceeding max_moves returns None instead of searching indefinitely."""
+        """When random_weight=0, exceeding max_expansions returns None instead of searching indefinitely."""
         # Scramble with 3 moves
         cube = solved_cube
         scramble = [((1, 0, 0), 1), ((0, 1, 0), 1), ((0, 0, 1), 1)]
         for m in scramble:
             cube = apply_move_to_cube(m, cube)
 
-        # Budget of 2 simulated moves is insufficient to solve a 3-move scramble
-        res = astar(cube, is_cube_solved, apply_move_to_cube, random_weight=0, max_moves=2)
+        # Budget of 2 expansions is insufficient to solve a 3-move scramble
+        res = astar(cube, is_cube_solved, apply_step_to_cube, random_weight=0, max_expansions=2)
         self.assertIsNone(res)
 
         # Sufficient budget succeeds
-        res = astar(cube, is_cube_solved, apply_move_to_cube, random_weight=0, max_moves=5000)
+        res = astar(cube, is_cube_solved, apply_step_to_cube, random_weight=0, max_expansions=5000)
         self.assertIsNotNone(res)
         dst, path = res
         self.assertTrue(is_cube_solved(dst))
@@ -177,8 +188,8 @@ class TestEigencube(unittest.TestCase):
         for m in scramble:
             cube = apply_move_to_cube(m, cube)
 
-        # Initial budget of 5 moves will trigger restarts but budget expands by 1.5x until solved
-        res = astar(cube, is_cube_solved, apply_move_to_cube, random_weight=0.25, max_moves=5)
+        # Initial budget of 5 expansions will trigger restarts but budget expands by 1.5x until solved
+        res = astar(cube, is_cube_solved, apply_step_to_cube, random_weight=0.25, max_expansions=5)
         self.assertIsNotNone(res)
         dst, path = res
         self.assertTrue(is_cube_solved(dst))
@@ -191,22 +202,22 @@ class TestEigencube(unittest.TestCase):
             0,
             lambda x: x == 5,
             lambda m, s: s,
-            get_moves=lambda s: [],
+            get_steps=lambda s: [],
             random_weight=0.25,
-            max_moves=1000,
+            max_expansions=1000,
         )
         self.assertIsNone(res)
 
         # 2. Finite 3-state cyclic component {0, 1, 2} with unreachable goal 99
-        # Moves simulated will reach max_moves=2, but once frontier empties it must return None
+        # Expansions will reach max_expansions=2, but once frontier empties it must return None
         dummy_move = ((1, 0, 0), 1)
         res_cyclic = astar(
             0,
             lambda x: x == 99,
             lambda m, s: (s + 1) % 3,
-            get_moves=lambda s: [dummy_move],
+            get_steps=lambda s: [(dummy_move,)],
             random_weight=0.25,
-            max_moves=2,
+            max_expansions=2,
         )
         self.assertIsNone(res_cyclic)
 
@@ -500,6 +511,90 @@ class TestEigencube(unittest.TestCase):
         self.assertIs(eigencube_gui.screen, custom_surf)
 
 
+class TestLearnedSteps(unittest.TestCase):
+    """Steps are learned at runtime, so their invariants must hold for any sequence."""
+
+    # A commutator of two adjacent faces: disturbs few cubelets.
+    commutator = (((-1, 0, 0), -1), ((0, -1, 0), -1), ((-1, 0, 0), 1), ((0, -1, 0), 1))
+
+    def setUp(self):
+        import eigencube
+        self.steps = eigencube.steps
+        self.saved_steps = dict(self.steps)
+
+    def tearDown(self):
+        self.steps.clear()
+        self.steps.update(self.saved_steps)
+
+    def test_symmetric_sequences_act_as_conjugates(self):
+        """Under every cube symmetry Q, the image of a sequence acts as Q * sequence * Q^T."""
+        from eigencube import symmetries, symmetric_move
+        rng = np.random.default_rng(0)
+        sequence = tuple(moves[i] for i in rng.integers(len(moves), size=8))
+        original = dict(apply_step_to_cube(sequence, solved_cube))
+        for Q in symmetries:
+            image = dict(apply_step_to_cube(tuple(symmetric_move(Q, m) for m in sequence), solved_cube))
+            for cubelet, rotation in original.items():
+                image_cubelet = tuple(int(x) for x in Q @ cubelet)
+                np.testing.assert_array_equal(image[image_cubelet], Q @ np.array(rotation) @ Q.T)
+
+    def assert_step_table_invariants(self):
+        from eigencube import num_disturbed, inverse_step, MAX_MACRO_DISTURBANCE
+        single_moves = {apply_step_to_cube((m,), solved_cube) for m in moves}
+        for effect, step in self.steps.items():
+            # Keyed by its true effect, and within the disturbance cap.
+            self.assertEqual(apply_step_to_cube(step, solved_cube), effect)
+            self.assertTrue(0 < num_disturbed(effect) <= MAX_MACRO_DISTURBANCE)
+            # Never a longer duplicate of a single move.
+            self.assertTrue(len(step) == 1 or effect not in single_moves)
+            # The inverse is a known step too.
+            self.assertIn(apply_step_to_cube(inverse_step(step), solved_cube), self.steps)
+
+    def test_step_table_starts_with_exactly_the_single_moves(self):
+        self.assertEqual(sorted(self.saved_steps.values()), sorted((m,) for m in moves))
+
+    def test_learned_steps_satisfy_table_invariants(self):
+        """Learning keeps every entry keyed by its effect, capped, deduplicated and closed under inverse."""
+        from eigencube import learn_step
+        learn_step(self.commutator)
+        self.assertIn(apply_step_to_cube(self.commutator, solved_cube), self.steps)
+        # Search results that equal a single move must not duplicate it.
+        for move in moves:
+            learn_step((move,))
+            learn_step(5 * (move,))
+            learn_step((move, move))
+        self.assert_step_table_invariants()
+
+    def test_step_matches_move_by_move_application(self):
+        """Applying a step equals applying its moves one by one, from any state."""
+        from eigencube import learn_step, shuffle
+        learn_step(self.commutator)
+        cube = shuffle(solved_cube, iterations=50, seed=7)
+        for step in self.steps.values():
+            expected = cube
+            for move in step:
+                expected = apply_move_to_cube(move, expected)
+            self.assertEqual(apply_step_to_cube(step, cube), expected)
+
+    def test_learn_step_rejects_trivial_and_disruptive_sequences(self):
+        """Sequences that disturb nothing, or too much, are not worth learning."""
+        from eigencube import learn_step
+        learn_step(())
+        learn_step((moves[0], inverse_move(moves[0])))  # Disturbs nothing.
+        learn_step(tuple(m for m in moves if m[1] == 1))  # Disturbs 20 of 26 cubelets.
+        self.assertEqual(self.steps, self.saved_steps)
+
+    def test_corner_twist_phase_solves_pure_twists(self):
+        """The endgame solves a cube whose only defect is two twisted corners."""
+        from eigencube import num_disturbed
+        left, top, bottom = ((0, -1, 0), 1), ((0, 0, 1), 1), ((0, 0, -1), 1)
+        twist_one_corner = 2 * (inverse_move(left), inverse_move(top), left, top)
+        twist_two_corners = twist_one_corner + (bottom,) + twist_one_corner * 2 + (inverse_move(bottom),)
+        cube = apply_step_to_cube(twist_two_corners, solved_cube)
+        self.assertEqual(num_disturbed(cube), 2)
+        solution = solve(cube)
+        self.assertTrue(is_cube_solved(apply_step_to_cube(tuple(solution), cube)))
+
+
 if __name__ == "__main__":
     unittest.main()
-

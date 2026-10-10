@@ -50,7 +50,7 @@ Finding the optimal solution to an arbitrary Rubik's cube is NP-hard, and God's 
 [Scrambled Cube]
        |
        v
-Phase 1: Top Layer & Centers (17 cubelets)
+Phase 1: Top Layer (9 cubelets)
        |
        v
 Phase 2: Middle Layer Edges (4 cubelets)
@@ -59,10 +59,10 @@ Phase 2: Middle Layer Edges (4 cubelets)
 Phase 3: Bottom Cross (4 edge orientations & positions)
        |
        v
-Phase 4: Bottom Corners (4 corner placements & twists)
+Phase 4: Bottom Corner Positions (4 corners, ignoring twist)
        |
        v
-Phase 5: Endgame Permutation Alignment
+Phase 5: Bottom Corner Twists (fixed routine)
        |
        v
  [Solved Cube]
@@ -74,9 +74,19 @@ A\* needs a sense of direction so it doesn't search aimlessly. Rather than stori
 - **Layer distance:** Combines the individual estimates of the active layer's target cubelets into a single distance score, pulling the search toward states where more cubelets are closer to home.
 - **State caching:** Evaluates successor states with memoized transposition caching (`@functools.cache`).
 
+### Learned Macros: Discovering Commutators
+Late in the solve, moving one more cubelet without disturbing the solved ones takes 8–20 moves: blind search at that depth is expensive. Human solvers memorize commutators for this; Eigencube **learns** them instead:
+- **Discovery:** Whenever a step's solution disturbs only a few cubelets of a solved cube (`MAX_MACRO_DISTURBANCE`), it is remembered as a *macro*. No notion of a commutator is built in; they emerge because they are exactly the sequences that disturb little.
+- **Symmetry:** Each macro is generalized to all 48 cube symmetries (signed permutation matrices $Q$, acting by conjugation $Q M Q^T$) and to its inverse.
+- **Reuse:** A\* searches over *steps*: a table holding, for each effect, the shortest known move sequence—seeded with the 12 single moves and grown by every learned macro. Each step is priced at its true move count. Once the right macros are known, deep steps collapse to a handful of steps.
+
+The first solve in a fresh process pays to discover its macros. Subsequent solves in the same process—e.g., in the GUI—typically finish in about a second.
+
+Only the final corner twists still use a fixed routine (`solve_endgame`). Searching for them works too, but before a twisting macro is known, that search can take many minutes: a twist only arises once nearly everything else is solved, so it cannot be learned any earlier.
+
 ### Search Performance & Randomized Restarts
-- **Throughput:** Simulates ~50,000 moves/sec via vector dot products and memoized transposition caching.
-- **Move-Budgeted Restarts:** To escape deep local plateaus in complex scrambles without storing massive precomputed pattern tables, A\* incorporates subtle priority randomization (`RANDOMIZE_SEARCH = True`) bounded by deterministic move budgets (`max_moves=100_000` with gentle $1.5\times$ expansion). Instead of wall-clock timers and OS signals, searches cut losses after exploring ~100k moves (~2s) and retry with fresh randomized weights without discarding prior layer progress. Typical scrambles solve in 5–25 seconds.
+- **Throughput:** Simulates ~30,000 steps/sec via vector dot products and memoized transposition caching.
+- **Budgeted Restarts:** To escape deep local plateaus in complex scrambles without storing massive precomputed pattern tables, A\* incorporates subtle priority randomization (`RANDOMIZE_SEARCH = True`) bounded by deterministic budgets (`max_expansions=10_000` with gentle $1.5\times$ expansion). The budget counts expanded states rather than simulated steps, so it measures search progress no matter how many macros are known. Instead of wall-clock timers and OS signals, searches cut losses after exhausting the budget and retry with fresh randomized weights without discarding prior layer progress.
 
 ---
 
