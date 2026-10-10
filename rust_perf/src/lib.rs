@@ -123,6 +123,38 @@ pub fn is_cube_solved(cube: &Cube) -> bool {
   cube.iter().all(|&(c, r)| is_cubelet_solved(c, r))
 }
 
+const fn partition<const N: usize>(cond: u8) -> [usize; N] {
+  let (mut arr, mut cnt, mut i) = ([0; N], 0, 0);
+  while i < 26 {
+    let c = CUBELETS[i];
+    let ok = match cond {
+      0 => c.2 == 1,
+      1 => c.2 == 0,
+      2 => c.2 >= 0,
+      3 => c.2 == -1,
+      4 => !c.is_bottom_corner(),
+      5 => c.is_bottom_edge(),
+      6 => c.is_bottom_corner(),
+      _ => c.is_top_edge(),
+    };
+    if ok {
+      arr[cnt] = i;
+      cnt += 1;
+    }
+    i += 1;
+  }
+  arr
+}
+
+pub const TOP_CUBELETS: [usize; 9] = partition(0);
+pub const MID_LAYER_CUBELETS: [usize; 8] = partition(1);
+pub const MID_CUBELETS: [usize; 17] = partition(2);
+pub const BOT_CUBELETS: [usize; 9] = partition(3);
+pub const NON_BOTTOM_CORNER_CUBELETS: [usize; 22] = partition(4);
+pub const BOTTOM_EDGE_CUBELETS: [usize; 4] = partition(5);
+pub const BOTTOM_CORNER_CUBELETS: [usize; 4] = partition(6);
+pub const TOP_EDGE_CUBELETS: [usize; 4] = partition(7);
+
 const SQRT_TABLE: [f64; 4] = [0.0, 1.0, std::f64::consts::SQRT_2, 1.732_050_807_568_877_2];
 
 pub struct Tables {
@@ -130,6 +162,10 @@ pub struct Tables {
   pub transition: [[[u8; 24]; 26]; 12],
   pub solved_dist: [[u8; 24]; 26],
   pub pos_dist: [[u8; 24]; 26],
+  pub sqrt_dist_solved: [[f32; 24]; 26],
+  pub sqrt_dist_pos: [[f32; 24]; 26],
+  pub is_solved: [[bool; 24]; 26],
+  pub is_pos_solved: [[bool; 24]; 26],
   pub prune_move: [[bool; 12]; 13],
 }
 
@@ -200,6 +236,20 @@ impl Tables {
     let solved_dist = compute_dist(is_cubelet_solved);
     let pos_dist = compute_dist(|c, r| (r * c) == c);
 
+    let (mut sqrt_dist_solved, mut is_solved) = ([[0.0f32; 24]; 26], [[false; 24]; 26]);
+    let (mut sqrt_dist_pos, mut is_pos_solved) = ([[0.0f32; 24]; 26], [[false; 24]; 26]);
+    for c_idx in 0..26 {
+      for r_idx in 0..24 {
+        let sd = solved_dist[c_idx][r_idx] as usize;
+        sqrt_dist_solved[c_idx][r_idx] = SQRT_TABLE[sd] as f32;
+        is_solved[c_idx][r_idx] = sd == 0;
+
+        let pd = pos_dist[c_idx][r_idx] as usize;
+        sqrt_dist_pos[c_idx][r_idx] = SQRT_TABLE[pd] as f32;
+        is_pos_solved[c_idx][r_idx] = pd == 0;
+      }
+    }
+
     let mut prune_move = [[false; 12]; 13];
     for last in 1..=12 {
       for next in 0..12 {
@@ -209,7 +259,17 @@ impl Tables {
       }
     }
 
-    Self { rotations, transition, solved_dist, pos_dist, prune_move }
+    Self {
+      rotations,
+      transition,
+      solved_dist,
+      pos_dist,
+      sqrt_dist_solved,
+      sqrt_dist_pos,
+      is_solved,
+      is_pos_solved,
+      prune_move,
+    }
   }
 }
 
@@ -260,53 +320,43 @@ impl FastCube {
   #[inline(always)]
   pub fn is_solved(&self) -> bool {
     let t = Tables::get();
-    (0..26).all(|i| t.solved_dist[i][self.0[i] as usize] == 0)
+    (0..26).all(|i| t.is_solved[i][self.0[i] as usize])
   }
 }
 
 #[inline(always)]
+fn layer_heuristic(c: &FastCube, indices: &[usize], table: &[[f32; 24]; 26], divisor: f32) -> f64 {
+  let sum: f32 = indices.iter().map(|&i| table[i][c.0[i] as usize]).sum();
+  ((sum * sum) / divisor) as f64
+}
+
+#[inline(always)]
 pub fn top_layer_heuristic(t: &Tables, c: &FastCube) -> f64 {
-  let s: f64 = (0..26)
-    .filter(|&i| CUBELETS[i].2 == 1)
-    .map(|i| SQRT_TABLE[t.solved_dist[i][c.0[i] as usize] as usize])
-    .sum();
-  (s * s) / 8.0
+  layer_heuristic(c, &TOP_CUBELETS, &t.sqrt_dist_solved, 8.0)
 }
 #[inline(always)]
 pub fn middle_layer_heuristic(t: &Tables, c: &FastCube) -> f64 {
-  let s: f64 = (0..26)
-    .filter(|&i| CUBELETS[i].2 >= 0)
-    .map(|i| SQRT_TABLE[t.solved_dist[i][c.0[i] as usize] as usize])
-    .sum();
-  (s * s) / 4.0
+  layer_heuristic(c, &MID_CUBELETS, &t.sqrt_dist_solved, 4.0)
 }
 #[inline(always)]
 pub fn bottom_layer_edge_heuristic(t: &Tables, c: &FastCube) -> f64 {
-  let s: f64 = (0..26)
-    .filter(|&i| !CUBELETS[i].is_bottom_corner())
-    .map(|i| SQRT_TABLE[t.solved_dist[i][c.0[i] as usize] as usize])
-    .sum();
-  (s * s) / 3.0
+  layer_heuristic(c, &NON_BOTTOM_CORNER_CUBELETS, &t.sqrt_dist_solved, 3.0)
 }
 #[inline(always)]
 pub fn bottom_layer_corner_heuristic(t: &Tables, c: &FastCube) -> f64 {
-  let s_top: f64 = (0..26)
-    .filter(|&i| CUBELETS[i].2 == 1)
-    .map(|i| SQRT_TABLE[t.solved_dist[i][c.0[i] as usize] as usize])
-    .sum();
-  let s_mid: f64 = (0..26)
-    .filter(|&i| CUBELETS[i].2 == 0)
-    .map(|i| SQRT_TABLE[t.solved_dist[i][c.0[i] as usize] as usize])
-    .sum();
-  let s_bot: f64 = (0..26)
-    .filter(|&i| CUBELETS[i].2 == -1)
-    .map(|i| {
-      let d =
-        if CUBELETS[i].is_bottom_corner() { t.pos_dist[i][c.0[i] as usize] } else { t.solved_dist[i][c.0[i] as usize] };
-      SQRT_TABLE[d as usize]
+  let s_top: f32 = TOP_CUBELETS.iter().map(|&i| t.sqrt_dist_solved[i][c.0[i] as usize]).sum();
+  let s_mid: f32 = MID_LAYER_CUBELETS.iter().map(|&i| t.sqrt_dist_solved[i][c.0[i] as usize]).sum();
+  let s_bot: f32 = BOT_CUBELETS
+    .iter()
+    .map(|&i| {
+      if CUBELETS[i].is_bottom_corner() {
+        t.sqrt_dist_pos[i][c.0[i] as usize]
+      } else {
+        t.sqrt_dist_solved[i][c.0[i] as usize]
+      }
     })
     .sum();
-  (s_top * s_top) / 5.0 + (s_mid * s_mid) / 3.0 + (s_bot * s_bot) / 8.0
+  ((s_top * s_top) / 5.0 + (s_mid * s_mid) / 3.0 + (s_bot * s_bot) / 8.0) as f64
 }
 
 pub fn log(msg: &str) {
@@ -407,23 +457,23 @@ pub fn astar(
   }
 }
 
-fn count(c: &FastCube, pred: impl Fn(usize) -> bool, is_solved: impl Fn(usize, usize) -> bool) -> usize {
-  (0..26).filter(|&i| pred(i) && is_solved(i, c.0[i] as usize)).count()
-}
-
 fn top_done(t: &Tables, i: usize, c: &FastCube) -> bool {
-  count(c, |j| CUBELETS[j].is_top_edge(), |j, r| t.solved_dist[j][r] == 0) >= 4.min(i + 1)
-    && count(c, |j| CUBELETS[j].2 == 1, |j, r| t.solved_dist[j][r] == 0) >= 9.min(i + 1)
-    && count(c, |j| CUBELETS[j].2 >= 0, |j, r| t.solved_dist[j][r] == 0) >= 17.min(i + 1)
+  TOP_EDGE_CUBELETS.iter().filter(|&&j| t.is_solved[j][c.0[j] as usize]).count() >= 4.min(i + 1)
+    && TOP_CUBELETS.iter().filter(|&&j| t.is_solved[j][c.0[j] as usize]).count() >= 9.min(i + 1)
+    && MID_CUBELETS.iter().filter(|&&j| t.is_solved[j][c.0[j] as usize]).count() >= 17.min(i + 1)
 }
 fn cross_done(t: &Tables, i: usize, c: &FastCube) -> bool {
   top_done(t, 16, c)
-    && count(c, |j| CUBELETS[j].is_bottom_edge(), |_, r| (t.rotations[r] * Vec3(0, 0, -1)) == Vec3(0, 0, -1))
+    && BOTTOM_EDGE_CUBELETS
+      .iter()
+      .filter(|&&j| (t.rotations[c.0[j] as usize] * Vec3(0, 0, -1)) == Vec3(0, 0, -1))
+      .count()
       >= 4.min(i + 1)
-    && count(c, |j| CUBELETS[j].is_bottom_edge(), |j, r| t.solved_dist[j][r] == 0) >= 4.min(i.saturating_sub(3))
+    && BOTTOM_EDGE_CUBELETS.iter().filter(|&&j| t.is_solved[j][c.0[j] as usize]).count() >= 4.min(i.saturating_sub(3))
 }
 fn corners_done(t: &Tables, i: usize, c: &FastCube) -> bool {
-  cross_done(t, 7, c) && count(c, |j| CUBELETS[j].is_bottom_corner(), |j, r| t.pos_dist[j][r] == 0) >= 4.min(i + 1)
+  cross_done(t, 7, c)
+    && BOTTOM_CORNER_CUBELETS.iter().filter(|&&j| t.is_pos_solved[j][c.0[j] as usize]).count() >= 4.min(i + 1)
 }
 
 fn solve_layer(
@@ -448,7 +498,7 @@ fn solve_layer(
 
 fn corner_oriented(t: &Tables, c_idx: usize, mut r_idx: usize, bot: usize) -> bool {
   (0..4).any(|_| {
-    let ok = t.solved_dist[c_idx][r_idx] == 0;
+    let ok = t.is_solved[c_idx][r_idx];
     r_idx = t.transition[bot][c_idx][r_idx] as usize;
     ok
   })
