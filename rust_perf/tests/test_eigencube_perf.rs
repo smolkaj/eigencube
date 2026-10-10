@@ -9,8 +9,8 @@ fn test_counts_and_group_size() {
   assert_eq!(tables.rotations[0], Mat3::ID);
   for c_idx in 0..26 {
     for r_idx in 0..24 {
-      assert!(tables.solved_dist[c_idx][r_idx] <= 3);
-      assert!(tables.pos_dist[c_idx][r_idx] <= 3);
+      assert!(tables.sqrt_dist_solved[c_idx][r_idx] <= 1.733);
+      assert!(tables.sqrt_dist_pos[c_idx][r_idx] <= 1.733);
     }
   }
 }

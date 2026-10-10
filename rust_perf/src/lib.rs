@@ -160,8 +160,6 @@ const SQRT_TABLE: [f64; 4] = [0.0, 1.0, std::f64::consts::SQRT_2, 1.732_050_807_
 pub struct Tables {
   pub rotations: [Mat3; 24],
   pub transition: [[[u8; 24]; 26]; 12],
-  pub solved_dist: [[u8; 24]; 26],
-  pub pos_dist: [[u8; 24]; 26],
   pub sqrt_dist_solved: [[f32; 24]; 26],
   pub sqrt_dist_pos: [[f32; 24]; 26],
   pub is_solved: [[bool; 24]; 26],
@@ -195,8 +193,7 @@ impl Tables {
     for m in 0..12 {
       let (mv, r_prime) = (MOVES[m], MOVES[m].rot_mat());
       for (r_idx, &r) in rotations.iter().enumerate() {
-        let nxt = r_prime * r;
-        rot_transition[m][r_idx] = rotations.iter().position(|&x| x == nxt).unwrap() as u8;
+        rot_transition[m][r_idx] = rotations.iter().position(|&x| x == r_prime * r).unwrap() as u8;
       }
       for (c_idx, &c) in CUBELETS.iter().enumerate() {
         for (r_idx, &r) in rotations.iter().enumerate() {
@@ -206,7 +203,7 @@ impl Tables {
       }
     }
 
-    let compute_dist = |is_goal: fn(Vec3, Mat3) -> bool| {
+    let compute_tables = |is_goal: fn(Vec3, Mat3) -> bool| {
       let mut dist = [[255u8; 24]; 26];
       for (c_idx, &c) in CUBELETS.iter().enumerate() {
         let (mut queue, mut qh, mut qt) = ([0usize; 24], 0, 0);
@@ -230,25 +227,19 @@ impl Tables {
           }
         }
       }
-      dist
+      let (mut sqrt_dist, mut is_solved) = ([[0.0f32; 24]; 26], [[false; 24]; 26]);
+      for c_idx in 0..26 {
+        for r_idx in 0..24 {
+          let d = dist[c_idx][r_idx] as usize;
+          sqrt_dist[c_idx][r_idx] = SQRT_TABLE[d] as f32;
+          is_solved[c_idx][r_idx] = d == 0;
+        }
+      }
+      (sqrt_dist, is_solved)
     };
 
-    let solved_dist = compute_dist(is_cubelet_solved);
-    let pos_dist = compute_dist(|c, r| (r * c) == c);
-
-    let (mut sqrt_dist_solved, mut is_solved) = ([[0.0f32; 24]; 26], [[false; 24]; 26]);
-    let (mut sqrt_dist_pos, mut is_pos_solved) = ([[0.0f32; 24]; 26], [[false; 24]; 26]);
-    for c_idx in 0..26 {
-      for r_idx in 0..24 {
-        let sd = solved_dist[c_idx][r_idx] as usize;
-        sqrt_dist_solved[c_idx][r_idx] = SQRT_TABLE[sd] as f32;
-        is_solved[c_idx][r_idx] = sd == 0;
-
-        let pd = pos_dist[c_idx][r_idx] as usize;
-        sqrt_dist_pos[c_idx][r_idx] = SQRT_TABLE[pd] as f32;
-        is_pos_solved[c_idx][r_idx] = pd == 0;
-      }
-    }
+    let (sqrt_dist_solved, is_solved) = compute_tables(is_cubelet_solved);
+    let (sqrt_dist_pos, is_pos_solved) = compute_tables(|c, r| (r * c) == c);
 
     let mut prune_move = [[false; 12]; 13];
     for last in 1..=12 {
@@ -259,17 +250,7 @@ impl Tables {
       }
     }
 
-    Self {
-      rotations,
-      transition,
-      solved_dist,
-      pos_dist,
-      sqrt_dist_solved,
-      sqrt_dist_pos,
-      is_solved,
-      is_pos_solved,
-      prune_move,
-    }
+    Self { rotations, transition, sqrt_dist_solved, sqrt_dist_pos, is_solved, is_pos_solved, prune_move }
   }
 }
 
@@ -444,6 +425,7 @@ pub fn astar(
         }
 
         let hw = if random_weight > 0.0 { rng.random_gauss(1.0, random_weight).max(0.01) } else { 1.0 };
+        // prio >= 0.0 ensures IEEE-754 non-negative floats map monotonically to u64 integer bit patterns
         let prio = ((next_cost as f64) + hw * heuristic(&dst)).to_bits();
         frontier.push((Reverse(prio), next_cost, mv_code, dst));
       }
