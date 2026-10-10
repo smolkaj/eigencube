@@ -83,25 +83,39 @@ impl Move {
 
 pub type Cubelet = (Vec3, Mat3);
 pub type Cube = [Cubelet; 26];
-pub const UNIT_VECTORS: [Vec3; 6] =
-  [Vec3(-1, 0, 0), Vec3(0, -1, 0), Vec3(0, 0, -1), Vec3(0, 0, 1), Vec3(0, 1, 0), Vec3(1, 0, 0)];
-const fn init_tables() -> ([Vec3; 26], Cube, [Move; 12]) {
-  let (mut c, mut s, mut m, mut i) =
-    ([Vec3(0, 0, 0); 26], [(Vec3(0, 0, 0), Mat3::ID); 26], [Move::new(Vec3(0, 0, 0), 0); 12], 0);
+pub const CUBELETS: [Vec3; 26] = {
+  let mut cubelets = [Vec3(0, 0, 0); 26];
+  let mut i = 0;
   while i < 26 {
     let idx = if i < 13 { i } else { i + 1 };
-    c[i] = Vec3((idx / 9) as i8 - 1, ((idx / 3) % 3) as i8 - 1, (idx % 3) as i8 - 1);
-    s[i] = (c[i], Mat3::ID);
-    if i < 12 {
-      m[i] = Move::new(UNIT_VECTORS[i / 2], if i % 2 == 0 { -1 } else { 1 });
-    }
+    cubelets[i] = Vec3((idx / 9) as i8 - 1, ((idx / 3) % 3) as i8 - 1, (idx % 3) as i8 - 1);
     i += 1;
   }
-  (c, s, m)
-}
-pub const CUBELETS: [Vec3; 26] = init_tables().0;
-pub const SOLVED_CUBE: Cube = init_tables().1;
-pub const MOVES: [Move; 12] = init_tables().2;
+  cubelets
+};
+
+pub const UNIT_VECTORS: [Vec3; 6] =
+  [Vec3(-1, 0, 0), Vec3(0, -1, 0), Vec3(0, 0, -1), Vec3(0, 0, 1), Vec3(0, 1, 0), Vec3(1, 0, 0)];
+
+pub const MOVES: [Move; 12] = {
+  let mut moves = [Move::new(Vec3(0, 0, 0), 0); 12];
+  let mut i = 0;
+  while i < 12 {
+    moves[i] = Move::new(UNIT_VECTORS[i / 2], if i % 2 == 0 { -1 } else { 1 });
+    i += 1;
+  }
+  moves
+};
+
+pub const SOLVED_CUBE: Cube = {
+  let mut cube = [(Vec3(0, 0, 0), Mat3::ID); 26];
+  let mut i = 0;
+  while i < 26 {
+    cube[i] = (CUBELETS[i], Mat3::ID);
+    i += 1;
+  }
+  cube
+};
 
 pub fn is_cubelet_solved(c: Vec3, r: Mat3) -> bool {
   (r * Mat3::diag(c)) == Mat3::diag(c)
@@ -197,7 +211,7 @@ pub fn astar<S: Copy + Ord + std::hash::Hash>(
       }
     }
 
-    if random_weight <= 0.0 {
+    if simulated < budget || random_weight <= 0.0 {
       return None;
     }
     log(&format!("search budget of {} moves exceeded; restarting", budget));
@@ -238,10 +252,11 @@ pub fn bottom_layer_edge_heuristic(cube: &Cube) -> f64 {
   norm_p05(cube, |c| !c.is_bottom_corner(), min_moves_to_solved) / 3.0
 }
 pub fn bottom_layer_corner_heuristic(cube: &Cube) -> f64 {
-  let c_h = |c: Vec3, r| if c.is_bottom_corner() { min_moves_to_pos(c, r) } else { min_moves_to_solved(c, r) };
+  let target_heuristic =
+    |c: Vec3, r| if c.is_bottom_corner() { min_moves_to_pos(c, r) } else { min_moves_to_solved(c, r) };
   (norm_p05(cube, |c| c.2 == 1, min_moves_to_solved) / 5.0)
     + (norm_p05(cube, |c| c.2 == 0, min_moves_to_solved) / 3.0)
-    + (norm_p05(cube, |c| c.2 == -1, c_h) / 8.0)
+    + (norm_p05(cube, |c| c.2 == -1, target_heuristic) / 8.0)
 }
 
 pub fn count_solved(cube: &Cube, f: impl Fn(Vec3) -> bool) -> usize {
@@ -289,10 +304,11 @@ fn corner_oriented((c, mut r): Cubelet, d_rot: Mat3) -> bool {
     ok
   })
 }
-// Endgame: orient bottom corners using (R' D' R D) * 2/4 and align bottom face
+// Endgame: orient bottom corners using (left' top' left top) * 2/4 and align bottom face
 pub fn solve_endgame(cube: &mut Cube, moves: &mut Vec<Move>) {
-  let (l, u, d) = (Move::new(Vec3(0, -1, 0), 1), Move::new(Vec3(0, 0, 1), 1), Move::new(Vec3(0, 0, -1), 1));
-  let (routine, d_rot) = ([l.invert(), u.invert(), l, u, l.invert(), u.invert(), l, u], d.rot_mat());
+  let (left, top, bottom) = (Move::new(Vec3(0, -1, 0), 1), Move::new(Vec3(0, 0, 1), 1), Move::new(Vec3(0, 0, -1), 1));
+  let (routine, d_rot) =
+    ([left.invert(), top.invert(), left, top, left.invert(), top.invert(), left, top], bottom.rot_mat());
 
   for _ in 0..4 {
     while !corner_oriented(bottom_left_front_corner(cube), d_rot) {
@@ -300,10 +316,10 @@ pub fn solve_endgame(cube: &mut Cube, moves: &mut Vec<Move>) {
         step(cube, moves, m);
       }
     }
-    step(cube, moves, d);
+    step(cube, moves, bottom);
   }
   while !is_cube_solved(cube) {
-    step(cube, moves, d);
+    step(cube, moves, bottom);
   }
 }
 

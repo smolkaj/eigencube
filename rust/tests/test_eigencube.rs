@@ -66,6 +66,13 @@ fn test_deterministic_budget_exhaustion() {
 }
 
 #[test]
+fn test_unreachable_goal_frontier_exhaustion_with_random_weight() {
+  // SO(3, Z) rotation group has 24 states. With budget = 100, frontier empties at 24 < budget.
+  let result = astar(Mat3::ID, |_| false, |m, &r| m.rot_mat() * r, |_| 0.0, 0.25, 100);
+  assert!(result.is_none());
+}
+
+#[test]
 fn test_full_scramble_solve() {
   let scrambled = shuffle(100, 42, SOLVED_CUBE);
   let moves = solve(scrambled);
