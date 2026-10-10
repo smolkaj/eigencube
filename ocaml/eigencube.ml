@@ -35,11 +35,7 @@ let id3 : mat = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
 
 let all_vectors =
   let coords = [ -1; 0; 1 ] in
-  List.concat_map coords ~f:(fun x ->
-      List.concat_map coords ~f:(fun y ->
-          List.map coords ~f:(fun z -> (x, y, z))
-      )
-  )
+  List.Cartesian_product.map3 coords coords coords ~f:(fun x y z -> (x, y, z))
 
 let cubelets = List.filter all_vectors ~f:(fun v -> norm1 v > 0)
 let unit_vectors = List.filter all_vectors ~f:(fun v -> norm1 v = 1)
@@ -176,7 +172,7 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
   if is_goal start then Some (start, []) else attempt max_moves
 
 (* Single-cubelet distance heuristics via unified A* search *)
-let cubelet_dist cache ~is_goal c r =
+let cubelet_dist ~cache ~is_goal c r =
   Hashtbl.find_or_add cache (c, r) ~default:(fun () ->
       match
         astar ~start:r ~is_goal:(is_goal c)
@@ -189,11 +185,11 @@ let cubelet_dist cache ~is_goal c r =
 
 let min_moves_to_solved =
   let cache = Hashtbl.Poly.create () in
-  cubelet_dist cache ~is_goal:is_cubelet_solved
+  cubelet_dist ~cache ~is_goal:is_cubelet_solved
 
 let min_moves_to_pos =
   let cache = Hashtbl.Poly.create () in
-  cubelet_dist cache ~is_goal:is_cubelet_pos_solved
+  cubelet_dist ~cache ~is_goal:is_cubelet_pos_solved
 
 let dist_solved c cube = min_moves_to_solved c (Map.find_exn cube c)
 let dist_pos c cube = min_moves_to_pos c (Map.find_exn cube c)
