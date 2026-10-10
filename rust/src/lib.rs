@@ -249,7 +249,7 @@ pub fn middle_layer_heuristic(cube: &Cube) -> f64 {
   norm_p05(cube, |c| c.2 >= 0, min_moves_to_solved) / 4.0
 }
 pub fn bottom_layer_edge_heuristic(cube: &Cube) -> f64 {
-  norm_p05(cube, |c| !(c.2 == -1 && c.norm1() == 3), min_moves_to_solved) / 3.0
+  norm_p05(cube, |c| !is_bottom_corner(c), min_moves_to_solved) / 3.0
 }
 pub fn bottom_layer_corner_heuristic(cube: &Cube) -> f64 {
   (norm_p05(cube, |c| c.2 == 1, min_moves_to_solved) / 5.0)
@@ -257,7 +257,7 @@ pub fn bottom_layer_corner_heuristic(cube: &Cube) -> f64 {
     + (norm_p05(
       cube,
       |c| c.2 == -1,
-      |c, r| if c.norm1() == 3 { min_moves_to_pos(c, r) } else { min_moves_to_solved(c, r) },
+      |c, r| if is_bottom_corner(c) { min_moves_to_pos(c, r) } else { min_moves_to_solved(c, r) },
     ) / 8.0)
 }
 
@@ -268,13 +268,16 @@ pub fn count_bottom_edges_positioned(cube: &Cube) -> usize {
   cube.iter().filter(|&&(c, r)| is_bottom_edge(c) && (r * Vec3(0, 0, -1)) == Vec3(0, 0, -1)).count()
 }
 pub fn count_bottom_corners_positioned(cube: &Cube) -> usize {
-  cube.iter().filter(|&&(c, r)| c.2 == -1 && c.norm1() == 3 && is_cubelet_pos_solved(c, r)).count()
+  cube.iter().filter(|&&(c, r)| is_bottom_corner(c) && is_cubelet_pos_solved(c, r)).count()
 }
 pub fn is_top_edge(v: Vec3) -> bool {
   v.2 == 1 && v.norm1() == 2
 }
 pub fn is_bottom_edge(v: Vec3) -> bool {
   v.2 == -1 && v.norm1() == 2
+}
+pub fn is_bottom_corner(v: Vec3) -> bool {
+  v.2 == -1 && v.norm1() == 3
 }
 
 fn solve_layer(
