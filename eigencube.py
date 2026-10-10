@@ -44,8 +44,8 @@ unit_vectors = [v for v in vectors if norm1(v) == 1]
 solved_cube = tuple((c, tupled(np.identity(3))) for c in vectors if any(c))
 NUM_CUBELETS = len(solved_cube)
 
-# A move is a clockwise or counterclockwise 90 degree rotation of the
-# slice pointed at by a unit vector.
+# A move is a 90 degree rotation of the slice pointed at by a unit vector,
+# clockwise (direction 1) or counterclockwise (-1) as seen looking at that face.
 moves = [(v, direction) for v in unit_vectors for direction in [-1, 1]]
 
 # Each color is encoded by the unit vector corresponding to the direction that

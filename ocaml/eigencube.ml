@@ -49,9 +49,9 @@ let moves =
    (dir = 1): M = v vᵀ - dir [v]ₓ, keeping the part along v and turning the
    rest by the cross product with v. *)
 let rot_mat { normal = x, y, z; dir } =
-  ( ((x * x), (x * y) + (dir * z), (x * z) - (dir * y)),
-    ((y * x) - (dir * z), (y * y), (y * z) + (dir * x)),
-    ((z * x) + (dir * y), (z * y) - (dir * x), (z * z))
+  ( (x * x, (x * y) + (dir * z), (x * z) - (dir * y)),
+    ((y * x) - (dir * z), y * y, (y * z) + (dir * x)),
+    ((z * x) + (dir * y), (z * y) - (dir * x), z * z)
   )
 
 let invert_move { normal; dir } = { normal; dir = -dir }
