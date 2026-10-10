@@ -317,13 +317,17 @@ class TestEigencube(unittest.TestCase):
         import pygame
         import eigencube_gui
 
+        samples = ((0, 0), (128, 128), (255, 255))
         with Image.open(eigencube_gui.REPO_DIR / "img" / "icon.png") as source:
             expected_size = source.size
             expected_alpha = source.mode == "RGBA"
+            expected_pixels = [source.getpixel(p) for p in samples]
         with patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
             icon = eigencube_gui.load_window_icon()
         self.assertEqual(icon.get_size(), expected_size)
         self.assertEqual(bool(icon.get_flags() & pygame.SRCALPHA), expected_alpha)
+        for point, expected in zip(samples, expected_pixels):  # pixel bytes preserved
+            self.assertEqual(tuple(icon.get_at(point)), expected)
 
     def test_gui_window_icon_fallback_keeps_opaque_rgb(self):
         """An alpha-free icon stays an alpha-free surface via the Pillow fallback, like a full pygame build."""
@@ -347,6 +351,7 @@ class TestEigencube(unittest.TestCase):
                 eigencube_gui.REPO_DIR = original_repo_dir
         self.assertEqual(icon.get_size(), (16, 8))
         self.assertFalse(icon.get_flags() & pygame.SRCALPHA)
+        self.assertEqual(tuple(icon.get_at((8, 4))), (10, 20, 30, 255))  # opaque pixels, read back as RGBA
 
     def test_gui_frame_saves_without_sdl_image(self):
         """Frames must save even when pygame can only decode BMP (no SDL_image), via the Pillow fallback."""
