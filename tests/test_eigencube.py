@@ -1,7 +1,10 @@
 import unittest
 import os
 import tempfile
+from pathlib import Path
+from unittest.mock import patch
 import numpy as np
+from PIL import Image
 
 from eigencube import (
     solved_cube,
@@ -309,6 +312,94 @@ class TestEigencube(unittest.TestCase):
             self.assertEqual(result, out_path)
             self.assertTrue(os.path.exists(out_path))
             self.assertGreater(os.path.getsize(out_path), 0)
+
+    def test_gui_window_icon_loads_without_sdl_image(self):
+        """Icon must load even when pygame can only decode BMP (no SDL_image), via the Pillow fallback."""
+        import pygame
+        import eigencube_gui
+
+        with Image.open(eigencube_gui.REPO_DIR / "img" / "icon.png") as source:
+            w, h = source.size
+            samples = ((0, 0), (w // 2, h // 2), (w - 1, h - 1))
+            expected_alpha = "A" in source.getbands() or "transparency" in source.info  # mirrors the code's probe
+            rgba_source = source.convert("RGBA")  # get_at always yields RGBA, whatever the source stores
+            expected_pixels = [rgba_source.getpixel(p) for p in samples]
+        with patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
+            icon = eigencube_gui.load_window_icon()
+        self.assertEqual(icon.get_size(), (w, h))
+        self.assertEqual(bool(icon.get_flags() & pygame.SRCALPHA), expected_alpha)
+        for point, expected in zip(samples, expected_pixels):  # pixel bytes preserved
+            self.assertEqual(tuple(icon.get_at(point)), expected)
+
+    def test_gui_window_icon_fallback_keeps_opaque_rgb(self):
+        """An alpha-free icon stays an alpha-free surface via the Pillow fallback, like a full pygame build."""
+        import pygame
+        import eigencube_gui
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            img_dir = os.path.join(tmp_dir, "img")
+            os.makedirs(img_dir)
+            Image.new("RGB", (16, 8), (10, 20, 30)).save(os.path.join(img_dir, "icon.png"))
+            with patch.object(eigencube_gui, "REPO_DIR", Path(tmp_dir)), \
+                 patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
+                icon = eigencube_gui.load_window_icon()
+        self.assertEqual(icon.get_size(), (16, 8))
+        self.assertFalse(icon.get_flags() & pygame.SRCALPHA)
+        self.assertEqual(tuple(icon.get_at((8, 4))), (10, 20, 30, 255))  # opaque pixels, read back as RGBA
+
+    def test_gui_window_icon_fallback_keeps_palette_alpha(self):
+        """A palette (P-mode) icon with a tRNS chunk must keep its transparency via the Pillow fallback."""
+        import pygame
+        import eigencube_gui
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            img_dir = os.path.join(tmp_dir, "img")
+            os.makedirs(img_dir)
+            palette = Image.new("P", (8, 4))
+            palette.putpalette([255, 0, 0, 0, 255, 0] + [0, 0, 0] * 254)
+            palette.putpixel((1, 0), 1)  # the only opaque-colored-and-transparent index
+            palette.info["transparency"] = 1
+            palette.save(os.path.join(img_dir, "icon.png"))
+            with patch.object(eigencube_gui, "REPO_DIR", Path(tmp_dir)), \
+                 patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
+                icon = eigencube_gui.load_window_icon()
+        self.assertTrue(icon.get_flags() & pygame.SRCALPHA)
+        self.assertEqual(tuple(icon.get_at((0, 0))), (255, 0, 0, 255))
+        self.assertEqual(tuple(icon.get_at((1, 0))), (0, 255, 0, 0))
+
+    def test_gui_frame_saves_without_sdl_image(self):
+        """Frames must save even when pygame can only decode BMP (no SDL_image), via the Pillow fallback."""
+        import pygame
+        import eigencube_gui
+
+        surf = pygame.Surface((40, 20))
+        surf.set_at((5, 5), (255, 0, 0))
+        surf.set_at((30, 15), (0, 255, 0))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out_path = os.path.join(tmp_dir, "frame.png")
+            with patch("pygame.image.save", side_effect=NotImplementedError("saving images of extended format is not available")):
+                eigencube_gui.save_frame(surf, out_path)
+            with Image.open(out_path) as saved:
+                self.assertEqual(saved.mode, "RGB")  # opaque surface stays opaque, like pygame's own save
+                self.assertEqual(saved.size, surf.get_size())  # dimensions preserved
+                self.assertEqual(saved.getpixel((5, 5)), (255, 0, 0))  # pixels preserved
+                self.assertEqual(saved.getpixel((30, 15)), (0, 255, 0))
+
+    def test_gui_frame_saves_keep_alpha_surface_rgba(self):
+        """An alpha surface must export as RGBA via the Pillow fallback, like pygame's own save."""
+        import pygame
+        import eigencube_gui
+
+        surf = pygame.Surface((40, 20), pygame.SRCALPHA)
+        surf.set_at((5, 5), (255, 0, 0, 128))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out_path = os.path.join(tmp_dir, "frame.png")
+            with patch("pygame.image.save", side_effect=NotImplementedError("saving images of extended format is not available")):
+                eigencube_gui.save_frame(surf, out_path)
+            with Image.open(out_path) as saved:
+                self.assertEqual(saved.mode, "RGBA")
+                self.assertEqual(saved.getpixel((5, 5)), (255, 0, 0, 128))
+                self.assertEqual(saved.getpixel((30, 15)), (0, 0, 0, 0))
 
     def test_gui_text_bubble_and_buttons(self):
         """Verify GUI button and text bubble components render without error across edge cases."""
