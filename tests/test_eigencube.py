@@ -1,7 +1,10 @@
 import unittest
 import os
 import tempfile
+from pathlib import Path
+from unittest.mock import patch
 import numpy as np
+from PIL import Image
 
 from eigencube import (
     solved_cube,
@@ -312,8 +315,6 @@ class TestEigencube(unittest.TestCase):
 
     def test_gui_window_icon_loads_without_sdl_image(self):
         """Icon must load even when pygame can only decode BMP (no SDL_image), via the Pillow fallback."""
-        from unittest.mock import patch
-        from PIL import Image
         import pygame
         import eigencube_gui
 
@@ -332,12 +333,8 @@ class TestEigencube(unittest.TestCase):
 
     def test_gui_window_icon_fallback_keeps_opaque_rgb(self):
         """An alpha-free icon stays an alpha-free surface via the Pillow fallback, like a full pygame build."""
-        from unittest.mock import patch
-        from pathlib import Path
-        from PIL import Image
         import pygame
         import eigencube_gui
-        import tempfile
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             img_dir = os.path.join(tmp_dir, "img")
@@ -352,12 +349,8 @@ class TestEigencube(unittest.TestCase):
 
     def test_gui_window_icon_fallback_keeps_palette_alpha(self):
         """A palette (P-mode) icon with a tRNS chunk must keep its transparency via the Pillow fallback."""
-        from unittest.mock import patch
-        from pathlib import Path
-        from PIL import Image
         import pygame
         import eigencube_gui
-        import tempfile
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             img_dir = os.path.join(tmp_dir, "img")
@@ -376,9 +369,6 @@ class TestEigencube(unittest.TestCase):
 
     def test_gui_frame_saves_without_sdl_image(self):
         """Frames must save even when pygame can only decode BMP (no SDL_image), via the Pillow fallback."""
-        from unittest.mock import patch
-        import tempfile
-        from PIL import Image
         import pygame
         import eigencube_gui
 
@@ -397,9 +387,6 @@ class TestEigencube(unittest.TestCase):
 
     def test_gui_frame_saves_keep_alpha_surface_rgba(self):
         """An alpha surface must export as RGBA via the Pillow fallback, like pygame's own save."""
-        from unittest.mock import patch
-        import tempfile
-        from PIL import Image
         import pygame
         import eigencube_gui
 

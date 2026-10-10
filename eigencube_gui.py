@@ -22,11 +22,9 @@ def load_window_icon():
         # Pillow is a hard dependency; SDL_image support is optional in some pygame builds.
         from PIL import Image
         with Image.open(path) as icon:
-            if "A" in icon.getbands() or "transparency" in icon.info:  # preserve the PNG's own color type
-                rgba = icon.convert("RGBA")
-                return pygame.image.frombytes(rgba.tobytes(), rgba.size, "RGBA")  # frombytes copies, unlike frombuffer
-            rgb = icon.convert("RGB")
-            return pygame.image.frombytes(rgb.tobytes(), rgb.size, "RGB")
+            mode = "RGBA" if ("A" in icon.getbands() or "transparency" in icon.info) else "RGB"
+            converted = icon.convert(mode)
+            return pygame.image.frombytes(converted.tobytes(), converted.size, mode)
 
 def init_display(surface=None):
     global screen, font_regular, font_bold, MAX_TEXT_HEIGHT
@@ -216,13 +214,8 @@ def save_frame(surface, output_path):
         pygame.image.save(surface, output_path)
     except (pygame.error, NotImplementedError):
         from PIL import Image
-        if surface.get_flags() & pygame.SRCALPHA:  # pygame's PNG writer keys on per-pixel alpha
-            pixel_bytes = pygame.image.tobytes(surface, "RGBA")
-            image = Image.frombuffer("RGBA", surface.get_size(), pixel_bytes, "raw", "RGBA", 0, 1)
-        else:
-            pixel_bytes = pygame.image.tobytes(surface, "RGB")
-            image = Image.frombuffer("RGB", surface.get_size(), pixel_bytes, "raw", "RGB", 0, 1)
-        image.save(output_path)  # pixel_bytes stays alive here; frombuffer shares it
+        mode = "RGBA" if (surface.get_flags() & pygame.SRCALPHA) else "RGB"
+        Image.frombytes(mode, surface.get_size(), pygame.image.tobytes(surface, mode)).save(output_path)
 
 def render_frame_to_image(cube, output_path=REPO_DIR / "img" / "gui-preview.png", solution=None, move_index=0, current_move=None, solving_cube=None):
     scr = init_display()
