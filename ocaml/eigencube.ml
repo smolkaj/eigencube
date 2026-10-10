@@ -115,14 +115,14 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
   let empty_frontier =
     Fheap.create ~compare:(fun a b -> Float.compare a.prio b.prio)
   in
+  let start_frontier =
+    Fheap.add empty_frontier
+      { prio = 0.0; cost = 0; last_move = None; state = start }
+  in
   let rec attempt budget =
     Hashtbl.clear visited;
     Hashtbl.set visited ~key:start ~data:{ cost = 0; prev = None };
-    search budget
-      (Fheap.add empty_frontier
-         { prio = 0.0; cost = 0; last_move = None; state = start }
-      )
-      0
+    search budget start_frontier 0
   and search budget frontier simulated =
     match Fheap.pop frontier with
     | None -> None
