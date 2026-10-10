@@ -110,7 +110,34 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
     let empty_frontier =
       Fheap.create ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2)
     in
-    let rec expand_moves budget src next_cost last_move mvs frontier simulated =
+    let rec attempt budget =
+      Hashtbl.clear visited;
+      Hashtbl.set visited ~key:start ~data:{ cost = 0; prev = None };
+      search budget (Fheap.add empty_frontier (0.0, start)) 0
+    and search budget frontier simulated =
+      match Fheap.pop frontier with
+      | None -> None
+      | Some ((_prio, src), rest_frontier) -> (
+        let { cost; prev } = Hashtbl.find_exn visited src in
+        let last_move = Option.map ~f:snd prev in
+        match
+          expand_moves budget src (cost + 1) last_move moves rest_frontier
+            simulated
+        with
+        | `Found solution -> Some solution
+        | `Continue (next_frontier, next_simulated) ->
+          if next_simulated >= budget then
+            if Float.(random_weight <= 0.0) then None
+            else begin
+              log "search budget of %d moves exceeded; restarting" budget;
+              attempt
+                (Int.max (budget + 1)
+                   (Float.to_int (Float.of_int budget *. 1.5))
+                )
+            end
+          else search budget next_frontier next_simulated
+      )
+    and expand_moves budget src next_cost last_move mvs frontier simulated =
       match mvs with
       | [] -> `Continue (frontier, simulated)
       | _ when simulated >= budget -> `Continue (frontier, simulated)
@@ -138,33 +165,6 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
               (Fheap.add frontier (prio, dst))
               (simulated + 1)
       )
-    and search budget frontier simulated =
-      match Fheap.pop frontier with
-      | None -> None
-      | Some ((_prio, src), rest_frontier) -> (
-        let { cost; prev } = Hashtbl.find_exn visited src in
-        let last_move = Option.map ~f:snd prev in
-        match
-          expand_moves budget src (cost + 1) last_move moves rest_frontier
-            simulated
-        with
-        | `Found solution -> Some solution
-        | `Continue (next_frontier, next_simulated) ->
-          if next_simulated >= budget then
-            if Float.(random_weight <= 0.0) then None
-            else begin
-              log "search budget of %d moves exceeded; restarting" budget;
-              attempt
-                (Int.max (budget + 1)
-                   (Float.to_int (Float.of_int budget *. 1.5))
-                )
-            end
-          else search budget next_frontier next_simulated
-      )
-    and attempt budget =
-      Hashtbl.clear visited;
-      Hashtbl.set visited ~key:start ~data:{ cost = 0; prev = None };
-      search budget (Fheap.add empty_frontier (0.0, start)) 0
     in
     attempt max_moves
 
