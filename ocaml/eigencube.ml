@@ -32,17 +32,16 @@ let ( *@* ) (r0, r1, r2) m =
 
 let diag (x, y, z) = ((x, 0, 0), (0, y, 0), (0, 0, z))
 let id3 : mat = ((1, 0, 0), (0, 1, 0), (0, 0, 1))
-let crange = [ -1; 0; 1 ]
+let coordinate_range = [ -1; 0; 1 ]
 
 let all_vectors =
-  List.concat_map crange ~f:(fun x ->
-      List.concat_map crange ~f:(fun y ->
-          List.map crange ~f:(fun z -> (x, y, z))
+  List.concat_map coordinate_range ~f:(fun x ->
+      List.concat_map coordinate_range ~f:(fun y ->
+          List.map coordinate_range ~f:(fun z -> (x, y, z))
       )
   )
 
 let cubelets = List.filter all_vectors ~f:(fun v -> norm1 v > 0)
-let num_cubelets = List.length cubelets
 let unit_vectors = List.filter all_vectors ~f:(fun v -> norm1 v = 1)
 
 let moves =
@@ -73,20 +72,10 @@ let solved_cube : cube =
   )
 
 let apply_move move (cube : cube) : cube =
-  let v = move.normal and rm = rot_mat move in
+  let v = move.normal and r' = rot_mat move in
   Map.mapi cube ~f:(fun ~key:c ~data:r ->
-      if dot v (r *@ c) > 0 then rm *@* r else r
+      if dot v (r *@ c) > 0 then r' *@* r else r
   )
-
-let empty_frontier () =
-  Fheap.create ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2)
-
-let random_gauss ~mean ~std =
-  let u1 = Float.max 1e-15 (Stdlib.Random.float 1.0)
-  and u2 = Stdlib.Random.float 1.0 in
-  mean
-  +. std
-     *. (Float.sqrt (-2.0 *. Float.log u1) *. Float.cos (2.0 *. Float.pi *. u2))
 
 let total_moves_simulated = ref 0
 
@@ -114,6 +103,16 @@ let log fmt =
 let astar (type state) ~(start : state) ~(is_goal : state -> bool)
     ~(apply_move : move -> state -> state) ?(heuristic = fun _ -> 0.0)
     ?(random_weight = 0.0) ?(max_moves = 100_000) () =
+  (* Box-Muller transform: samples N(mean, std^2), mirroring Python's random.gauss. *)
+  let random_gauss ~mean ~std =
+    let u1 = Float.max 1e-15 (Stdlib.Random.float 1.0)
+    and u2 = Stdlib.Random.float 1.0 in
+    mean
+    +. std
+       *. (Float.sqrt (-2.0 *. Float.log u1)
+          *. Float.cos (2.0 *. Float.pi *. u2)
+          )
+  in
   let rec attempt budget =
     let came_from = Hashtbl.Poly.create ~size:8192 () in
     let cost_so_far = Hashtbl.Poly.create ~size:8192 () in
@@ -175,7 +174,10 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
           else search next_frontier next_simulated
       )
     in
-    search (Fheap.add (empty_frontier ()) (0.0, start)) 0
+    let empty_frontier =
+      Fheap.create ~compare:(fun (p1, _) (p2, _) -> Float.compare p1 p2)
+    in
+    search (Fheap.add empty_frontier (0.0, start)) 0
   in
   if is_goal start then Some (start, []) else attempt max_moves
 
@@ -189,16 +191,16 @@ let cubelet_dist cache ~is_goal c r =
       | None -> 0
   )
 
-let dist_solved_cache = Hashtbl.Poly.create ()
-let dist_pos_cache = Hashtbl.Poly.create ()
+let min_moves_to_solved =
+  let cache = Hashtbl.Poly.create () in
+  fun c r -> cubelet_dist cache ~is_goal:(is_cubelet_solved c) c r
 
-let min_moves_to_solved c r =
-  cubelet_dist dist_solved_cache ~is_goal:(is_cubelet_solved c) c r
-
-let min_moves_to_pos c r =
-  cubelet_dist dist_pos_cache ~is_goal:(is_cubelet_pos_solved c) c r
+let min_moves_to_pos =
+  let cache = Hashtbl.Poly.create () in
+  fun c r -> cubelet_dist cache ~is_goal:(is_cubelet_pos_solved c) c r
 
 let dist_solved c cube = min_moves_to_solved c (Map.find_exn cube c)
+let dist_pos c cube = min_moves_to_pos c (Map.find_exn cube c)
 let top_cubelets = List.filter cubelets ~f:(fun (_, _, z) -> z = 1)
 let middle_belt_cubelets = List.filter cubelets ~f:(fun (_, _, z) -> z = 0)
 let middle_cubelets = top_cubelets @ middle_belt_cubelets
@@ -209,12 +211,11 @@ let bottom_edges =
 let bottom_cubelets = List.filter cubelets ~f:(fun (_, _, z) -> z = -1)
 
 let norm_p05 group ~f =
-  let sum =
-    List.fold group ~init:0.0 ~f:(fun acc item ->
-        acc +. Float.sqrt (Float.of_int (f item))
-    )
-  in
-  sum *. sum
+  List.sum
+    (module Float)
+    group
+    ~f:(fun item -> Float.sqrt (Float.of_int (f item)))
+  |> fun sum -> sum *. sum
 
 let top_layer_heuristic (cube : cube) =
   norm_p05 top_cubelets ~f:(fun c -> dist_solved c cube) /. 8.0
@@ -229,8 +230,7 @@ let bottom_layer_corner_heuristic (cube : cube) =
   (norm_p05 top_cubelets ~f:(fun c -> dist_solved c cube) /. 5.0)
   +. (norm_p05 middle_belt_cubelets ~f:(fun c -> dist_solved c cube) /. 3.0)
   +. norm_p05 bottom_cubelets ~f:(fun c ->
-         let r = Map.find_exn cube c in
-         if norm1 c = 3 then min_moves_to_pos c r else min_moves_to_solved c r
+         if norm1 c = 3 then dist_pos c cube else dist_solved c cube
      )
      /. 8.0
 
@@ -268,10 +268,7 @@ let solve_layer ~name ~total ~is_goal ~heuristic ~random_weight cube =
   loop 0 cube []
 
 let bottom_left_front_corner (cube : cube) =
-  let target = (1, -1, -1) in
-  match List.find (Map.to_alist cube) ~f:(fun (c, r) -> r *@ c = target) with
-  | Some (c, r) -> (c, r)
-  | None -> failwith "Corner not found"
+  List.find_exn (Map.to_alist cube) ~f:(fun (c, r) -> r *@ c = (1, -1, -1))
 
 (* Endgame: orient bottom corners using (R' D' R D) * 2/4 and align bottom face *)
 let solve_endgame cube =
@@ -284,9 +281,9 @@ let solve_endgame cube =
   let apply_all state mvs = List.fold mvs ~init:state ~f:apply in
   let is_corner_oriented c =
     let c_orig, r = bottom_left_front_corner c in
-    let bm = rot_mat bottom in
+    let r' = rot_mat bottom in
     let rec check k rot =
-      k < 4 && (is_cubelet_solved c_orig rot || check (k + 1) (bm *@* rot))
+      k < 4 && (is_cubelet_solved c_orig rot || check (k + 1) (r' *@* rot))
     in
     check 0 r
   in

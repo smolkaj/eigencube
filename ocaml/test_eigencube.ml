@@ -5,7 +5,7 @@ open Eigencube
 let run_tests () =
   printf "Running OCaml Eigencube Invariant Tests...\n%!";
   (* Test 1: Cubelet count and canonical positions *)
-  assert (num_cubelets = 26);
+  assert (List.length cubelets = 26);
   assert (List.length moves = 12);
   printf "  [PASS] Cubelet count and move counts match.\n%!";
 
