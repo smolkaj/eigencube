@@ -91,9 +91,9 @@ let random_gauss ~mean ~stdev =
   |> fun sum -> mean +. (stdev *. (sum -. 6.0))
 
 (* Multi-phase A* search with move-budgeted restarts (1.5x expansion) *)
-type 'a node = { cost : int; prev : ('a * move) option }
+type 'a visited_node = { cost : int; prev : ('a * move) option }
 
-type 'a entry = {
+type 'a frontier_node = {
   prio : float;
   cost : int;
   last_move : move option;
@@ -150,7 +150,7 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
       Int.incr total_moves_simulated;
       let dst = apply_move move src in
       match Hashtbl.find visited dst with
-      | Some n when n.cost <= next_cost ->
+      | Some v when v.cost <= next_cost ->
         expand_moves budget src next_cost last_move rest frontier (simulated + 1)
       | _ ->
         Hashtbl.set visited ~key:dst
