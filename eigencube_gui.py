@@ -217,9 +217,9 @@ def save_frame(surface, output_path):
     except (pygame.error, NotImplementedError):
         from PIL import Image
         if surface.get_flags() & pygame.SRCALPHA:  # pygame's PNG writer keys on per-pixel alpha
-            image = Image.frombuffer("RGBA", surface.get_size(), pygame.image.tostring(surface, "RGBA"), "raw", "RGBA", 0, 1)
+            image = Image.frombuffer("RGBA", surface.get_size(), pygame.image.tobytes(surface, "RGBA"), "raw", "RGBA", 0, 1)
         else:
-            image = Image.frombuffer("RGB", surface.get_size(), pygame.image.tostring(surface, "RGB"), "raw", "RGB", 0, 1)
+            image = Image.frombuffer("RGB", surface.get_size(), pygame.image.tobytes(surface, "RGB"), "raw", "RGB", 0, 1)
         image.save(output_path)
 
 def render_frame_to_image(cube, output_path=REPO_DIR / "img" / "gui-preview.png", solution=None, move_index=0, current_move=None, solving_cube=None):

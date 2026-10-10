@@ -317,15 +317,16 @@ class TestEigencube(unittest.TestCase):
         import pygame
         import eigencube_gui
 
-        samples = ((0, 0), (128, 128), (255, 255))
         with Image.open(eigencube_gui.REPO_DIR / "img" / "icon.png") as source:
-            expected_size = source.size
+            w, h = source.size
+            samples = ((0, 0), (w // 2, h // 2), (w - 1, h - 1))
+            expected_alpha = "A" in source.getbands() or "transparency" in source.info  # mirrors the code's probe
             rgba_source = source.convert("RGBA")  # get_at always yields RGBA, whatever the source stores
             expected_pixels = [rgba_source.getpixel(p) for p in samples]
         with patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
             icon = eigencube_gui.load_window_icon()
-        self.assertEqual(icon.get_size(), expected_size)
-        self.assertTrue(icon.get_flags() & pygame.SRCALPHA)
+        self.assertEqual(icon.get_size(), (w, h))
+        self.assertEqual(bool(icon.get_flags() & pygame.SRCALPHA), expected_alpha)
         for point, expected in zip(samples, expected_pixels):  # pixel bytes preserved
             self.assertEqual(tuple(icon.get_at(point)), expected)
 
@@ -342,13 +343,9 @@ class TestEigencube(unittest.TestCase):
             img_dir = os.path.join(tmp_dir, "img")
             os.makedirs(img_dir)
             Image.new("RGB", (16, 8), (10, 20, 30)).save(os.path.join(img_dir, "icon.png"))
-            original_repo_dir = eigencube_gui.REPO_DIR
-            eigencube_gui.REPO_DIR = Path(tmp_dir)
-            try:
-                with patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
-                    icon = eigencube_gui.load_window_icon()
-            finally:
-                eigencube_gui.REPO_DIR = original_repo_dir
+            with patch.object(eigencube_gui, "REPO_DIR", Path(tmp_dir)), \
+                 patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
+                icon = eigencube_gui.load_window_icon()
         self.assertEqual(icon.get_size(), (16, 8))
         self.assertFalse(icon.get_flags() & pygame.SRCALPHA)
         self.assertEqual(tuple(icon.get_at((8, 4))), (10, 20, 30, 255))  # opaque pixels, read back as RGBA
@@ -370,13 +367,9 @@ class TestEigencube(unittest.TestCase):
             palette.putpixel((1, 0), 1)  # the only opaque-colored-and-transparent index
             palette.info["transparency"] = 1
             palette.save(os.path.join(img_dir, "icon.png"))
-            original_repo_dir = eigencube_gui.REPO_DIR
-            eigencube_gui.REPO_DIR = Path(tmp_dir)
-            try:
-                with patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
-                    icon = eigencube_gui.load_window_icon()
-            finally:
-                eigencube_gui.REPO_DIR = original_repo_dir
+            with patch.object(eigencube_gui, "REPO_DIR", Path(tmp_dir)), \
+                 patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
+                icon = eigencube_gui.load_window_icon()
         self.assertTrue(icon.get_flags() & pygame.SRCALPHA)
         self.assertEqual(tuple(icon.get_at((0, 0))), (255, 0, 0, 255))
         self.assertEqual(tuple(icon.get_at((1, 0))), (0, 255, 0, 0))
