@@ -94,9 +94,7 @@ let random_gauss ~mean ~stdev =
 let astar (type state) ~(start : state) ~(is_goal : state -> bool)
     ~(apply_move : move -> state -> state) ?(heuristic = fun _ -> 0.0)
     ?(random_weight = 0.0) ?(max_moves = 100_000) () =
-  let open struct
-    type node = { cost : int; prev : (state * move) option }
-  end in
+  let type node = { cost : int; prev : (state * move) option } in
   let rec attempt budget =
     let visited = Hashtbl.Poly.create ~size:16384 () in
     Hashtbl.set visited ~key:start ~data:{ cost = 0; prev = None };
