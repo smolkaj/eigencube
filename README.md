@@ -205,10 +205,11 @@ The test suite covers:
 
 ```
 eigencube/
-├── eigencube.py            # Core solver & linear algebra model (< 400 lines)
+├── eigencube.py            # Core solver & linear algebra model (< 400 lines, canonical)
 ├── eigencube_gui.py        # Pygame GUI with animated moves & step playback
 ├── eigencube_scanner.py    # Computer vision scanner for physical cubes (OpenCV)
 ├── explainer/              # Animated video explainer of the encoding (Manim)
+├── ocaml/                  # Minimalistic OCaml port (< 400 lines)
 ├── scripts/
 │   └── generate_logo.py    # Logo, icons & GitHub social preview generator
 ├── tests/
@@ -229,10 +230,22 @@ eigencube/
 
 ---
 
+## Language Ports
+
+While [`eigencube.py`](eigencube.py) is the canonical reference implementation powering the visualizer and scanner, Eigencube welcomes self-contained ports of the core mathematical solver to other programming languages.
+
+Each port lives in its own top-level directory named after the language:
+- [`ocaml/`](ocaml/): A self-contained, typed functional pearl in OCaml (< 400 lines) using immutable maps and $SO(3, \mathbb{Z})$ linear algebra.
+
+Each language port must be self-contained within its directory, faithfully preserve the discrete 3D linear algebra formulation and the $R \cdot \text{diag}(c) = \text{diag}(c)$ solved invariant, maintain zero external puzzle dependencies, and provide its own standalone test suite.
+
+---
+
 ## Invariants & Design Principles
 
+- **Single source of truth:** Code, specifications, and design principles must each have exactly one canonical representation. `eigencube.py` is the canonical reference implementation of the solver and visualizer. Language ports (such as `ocaml/`) are self-contained companions that faithfully mirror this canonical model in other language ecosystems without duplicating or fragmenting the core application stack.
 - **A Functional Pearl (Maximally elegant, simple, and educational):** Eigencube is designed in the tradition of a *functional pearl*—an elegant, instructive gem where the code is an executable mathematical specification. Code clarity, linear algebra transparency, and pedagogical beauty always trump micro-optimizations or clever programming tricks.
 - **Self-documenting, transparent code:** Code should read as self-explanatory prose. Reject cryptic abbreviations, single-letter domain shorthand, or dense tuple indexing. Prefer clear, descriptive names (`left`, `top`, `bottom` rather than `L`, `U`, `D`) so anyone can understand the logic without an external decoder ring.
-- **Zero ambient magic:** No obscure puzzle encodings or heavyweight dependencies. Pure NumPy vector and matrix arithmetic.
-- **Strict code compactness:** The complete solver and domain model in `eigencube.py` strictly stays below 400 lines of clean, readable Python.
+- **Zero ambient magic:** No obscure puzzle encodings or heavyweight dependencies. Pure vector and matrix arithmetic.
+- **Strict code compactness:** The complete solver and domain model in `eigencube.py` (and in each language port) strictly stays below 400 lines of clean, readable code.
 - **Headless-friendly:** GUI components decouple display initializers so importing `eigencube_gui` works seamlessly in headless CI/CD environments.

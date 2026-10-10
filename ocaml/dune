@@ -1,0 +1,19 @@
+(library
+ (name eigencube)
+ (modules eigencube)
+ (libraries base core_kernel.fheap stdio unix)
+ (preprocess
+  (pps ppx_jane)))
+
+(executable
+ (name main)
+ (public_name eigencube)
+ (package eigencube)
+ (modules main)
+ (libraries eigencube base stdio unix))
+
+(test
+ (name test_eigencube)
+ (package eigencube)
+ (modules test_eigencube)
+ (libraries eigencube base stdio unix))
