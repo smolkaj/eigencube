@@ -13,6 +13,17 @@ font_regular = None
 font_bold = None
 MAX_TEXT_HEIGHT = 20
 
+def load_window_icon():
+    """Load the window icon, falling back to Pillow when pygame lacks SDL_image (BMP-only builds)."""
+    path = REPO_DIR / "img" / "icon.png"
+    try:
+        return pygame.image.load(path)
+    except pygame.error:
+        # Pillow is a hard dependency; SDL_image support is optional in some pygame builds.
+        from PIL import Image
+        with Image.open(path) as icon:
+            return pygame.image.frombuffer(icon.convert("RGBA").tobytes(), icon.size, "RGBA")
+
 def init_display(surface=None):
     global screen, font_regular, font_bold, MAX_TEXT_HEIGHT
     if surface is not None:
@@ -20,7 +31,7 @@ def init_display(surface=None):
     elif screen is None or not pygame.display.get_init():
         pygame.init()
         pygame.display.set_caption("Eigencube — Rubik's Cube Solver")
-        pygame.display.set_icon(pygame.image.load(REPO_DIR / "img" / "icon.png"))  # before set_mode, per SDL
+        pygame.display.set_icon(load_window_icon())  # before set_mode, per SDL
         pygame.key.set_repeat(300, 50)  # delay, interval
         screen = pygame.display.set_mode((WIDTH, HEIGHT))
         font_regular = None
@@ -195,6 +206,14 @@ def create_header_buttons(solving=False):
     solve_btn = create_button(solve_text, 2 * button_spacing + button_width, button_y, button_width, button_height, solve_color, WHITE)
     return shuffle_btn, solve_btn
 
+def save_frame(surface, output_path):
+    """Save a rendered frame as PNG, falling back to Pillow when pygame lacks SDL_image (BMP-only builds)."""
+    try:
+        pygame.image.save(surface, output_path)
+    except (pygame.error, NotImplementedError):
+        from PIL import Image
+        Image.frombuffer("RGBA", surface.get_size(), pygame.image.tostring(surface, "RGBA"), "raw", "RGBA", 0, 1).save(output_path)
+
 def render_frame_to_image(cube, output_path=REPO_DIR / "img" / "gui-preview.png", solution=None, move_index=0, current_move=None, solving_cube=None):
     scr = init_display()
     scr.fill(BACKGROUND)
@@ -210,7 +229,7 @@ def render_frame_to_image(cube, output_path=REPO_DIR / "img" / "gui-preview.png"
         draw_instructions(HEIGHT - 60)
     draw_move_info(move_index, solution, current_move, solving_cube=solving_cube)
 
-    pygame.image.save(scr, output_path)
+    save_frame(scr, output_path)
     return output_path
 
 def draw_move_info(move_index, solution, current_move, solving_cube=None):

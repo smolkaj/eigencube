@@ -310,6 +310,33 @@ class TestEigencube(unittest.TestCase):
             self.assertTrue(os.path.exists(out_path))
             self.assertGreater(os.path.getsize(out_path), 0)
 
+    def test_gui_window_icon_loads_without_sdl_image(self):
+        """Icon must load even when pygame can only decode BMP (no SDL_image), via the Pillow fallback."""
+        from unittest.mock import patch
+        import pygame
+        import eigencube_gui
+
+        with patch("pygame.image.load", side_effect=pygame.error("File is not a Windows BMP file")):
+            icon = eigencube_gui.load_window_icon()
+        self.assertEqual(icon.get_size(), (256, 256))
+        self.assertTrue(icon.get_flags() & pygame.SRCALPHA)
+
+    def test_gui_frame_saves_without_sdl_image(self):
+        """Frames must save even when pygame can only decode BMP (no SDL_image), via the Pillow fallback."""
+        from unittest.mock import patch
+        import tempfile
+        import pygame
+        import eigencube_gui
+
+        surf = pygame.Surface((40, 20))
+        surf.fill((0, 0, 0))
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out_path = os.path.join(tmp_dir, "frame.png")
+            with patch("pygame.image.save", side_effect=NotImplementedError("saving images of extended format is not available")):
+                eigencube_gui.save_frame(surf, out_path)
+            self.assertTrue(os.path.exists(out_path))
+            self.assertGreater(os.path.getsize(out_path), 0)
+
     def test_gui_text_bubble_and_buttons(self):
         """Verify GUI button and text bubble components render without error across edge cases."""
         import eigencube_gui
