@@ -208,6 +208,7 @@ eigencube/
 ├── eigencube_gui.py        # Pygame GUI with animated moves & step playback
 ├── explainer/              # Animated video explainer of the encoding (Manim)
 ├── ocaml/                  # Minimalistic OCaml port (< 400 lines)
+├── rust/                   # Minimalistic Rust port (< 400 lines)
 ├── scripts/
 │   └── generate_logo.py    # Logo, icons & GitHub social preview generator
 ├── tests/
@@ -234,6 +235,7 @@ While [`eigencube.py`](eigencube.py) is the canonical reference implementation p
 
 Each port lives in its own top-level directory named after the language:
 - [`ocaml/`](ocaml/): A self-contained, typed functional pearl in OCaml (< 400 lines) using immutable association lists and $SO(3, \mathbb{Z})$ linear algebra.
+- [`rust/`](rust/): A self-contained, high-performance port in Rust (< 400 lines) using stack-allocated value structs, discrete linear algebra, and on-demand memoized heuristics. Run tests via `cargo test --manifest-path rust/Cargo.toml --release`.
 
 Each language port must be self-contained within its directory, faithfully preserve the discrete 3D linear algebra formulation and the $R \cdot \text{diag}(c) = \text{diag}(c)$ solved invariant, maintain zero external puzzle dependencies, and provide its own standalone test suite.
 
