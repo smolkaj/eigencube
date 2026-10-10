@@ -22,7 +22,10 @@ def load_window_icon():
         # Pillow is a hard dependency; SDL_image support is optional in some pygame builds.
         from PIL import Image
         with Image.open(path) as icon:
-            return pygame.image.frombuffer(icon.convert("RGBA").tobytes(), icon.size, "RGBA")
+            if icon.mode == "RGBA":
+                return pygame.image.frombuffer(icon.tobytes(), icon.size, "RGBA")
+            rgb = icon.convert("RGB")
+            return pygame.image.frombuffer(rgb.tobytes(), rgb.size, "RGB")
 
 def init_display(surface=None):
     global screen, font_regular, font_bold, MAX_TEXT_HEIGHT
@@ -212,7 +215,10 @@ def save_frame(surface, output_path):
         pygame.image.save(surface, output_path)
     except (pygame.error, NotImplementedError):
         from PIL import Image
-        Image.frombuffer("RGBA", surface.get_size(), pygame.image.tostring(surface, "RGBA"), "raw", "RGBA", 0, 1).save(output_path)
+        image = Image.frombuffer("RGBA", surface.get_size(), pygame.image.tostring(surface, "RGBA"), "raw", "RGBA", 0, 1)
+        if not (surface.get_flags() & pygame.SRCALPHA):
+            image = image.convert("RGB")  # match pygame's own output for opaque surfaces
+        image.save(output_path)
 
 def render_frame_to_image(cube, output_path=REPO_DIR / "img" / "gui-preview.png", solution=None, move_index=0, current_move=None, solving_cube=None):
     scr = init_display()
