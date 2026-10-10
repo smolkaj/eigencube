@@ -1,0 +1,21 @@
+[package]
+name = "eigencube-perf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rustc-hash = "2.1"
+
+[[bin]]
+name = "eigencube-perf"
+path = "src/main.rs"
+
+[lib]
+name = "eigencube_perf"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
