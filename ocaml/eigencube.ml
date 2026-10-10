@@ -45,10 +45,14 @@ let moves =
       [ { normal; dir = -1 }; { normal; dir = 1 } ]
   )
 
-let rot_mat { normal = x, y, _; dir } =
-  if x <> 0 then ((1, 0, 0), (0, 0, dir), (0, -dir, 0))
-  else if y <> 0 then ((0, 0, dir), (0, 1, 0), (-dir, 0, 0))
-  else ((0, dir, 0), (-dir, 0, 0), (0, 0, 1))
+(* A quarter turn about the normal v, clockwise as seen looking at that face
+   (dir = 1): M = v vᵀ - dir [v]ₓ, keeping the part along v and turning the
+   rest by the cross product with v. *)
+let rot_mat { normal = x, y, z; dir } =
+  ( ((x * x), (x * y) + (dir * z), (x * z) - (dir * y)),
+    ((y * x) - (dir * z), (y * y), (y * z) + (dir * x)),
+    ((z * x) + (dir * y), (z * y) - (dir * x), (z * z))
+  )
 
 let invert_move { normal; dir } = { normal; dir = -dir }
 
