@@ -7,6 +7,12 @@ fn test_counts_and_group_size() {
   assert_eq!(MOVES.len(), 12);
   assert_eq!(tables.rotations.len(), 24);
   assert_eq!(tables.rotations[0], Mat3::ID);
+  for c_idx in 0..26 {
+    for r_idx in 0..24 {
+      assert!(tables.solved_dist[c_idx][r_idx] <= 3);
+      assert!(tables.pos_dist[c_idx][r_idx] <= 3);
+    }
+  }
 }
 
 #[test]
@@ -25,6 +31,13 @@ fn test_fast_cube_roundtrip() {
   let fast_cube = FastCube::from_cube(&c0);
   assert_eq!(fast_cube, FastCube::SOLVED);
   assert_eq!(fast_cube.to_cube(), c0);
+
+  // Permuted cubelet ordering
+  let mut permuted = c0;
+  permuted.reverse();
+  let fast_permuted = FastCube::from_cube(&permuted);
+  assert_eq!(fast_permuted, FastCube::SOLVED);
+  assert_eq!(fast_permuted.to_cube(), c0);
 
   let scrambled = shuffle(50, 42, c0);
   let fast_scrambled = FastCube::from_cube(&scrambled);

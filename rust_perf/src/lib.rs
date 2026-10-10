@@ -123,7 +123,7 @@ pub fn is_cube_solved(cube: &Cube) -> bool {
   cube.iter().all(|&(c, r)| is_cubelet_solved(c, r))
 }
 
-const SQRT_TABLE: [f64; 5] = [0.0, 1.0, std::f64::consts::SQRT_2, 1.732_050_807_568_877_2, 2.0];
+const SQRT_TABLE: [f64; 4] = [0.0, 1.0, std::f64::consts::SQRT_2, 1.732_050_807_568_877_2];
 
 pub struct Tables {
   pub rotations: [Mat3; 24],
@@ -155,8 +155,13 @@ impl Tables {
     }
 
     let mut transition = [[[0u8; 24]; 26]; 12];
+    let mut rot_transition = [[0u8; 24]; 12];
     for m in 0..12 {
       let (mv, r_prime) = (MOVES[m], MOVES[m].rot_mat());
+      for (r_idx, &r) in rotations.iter().enumerate() {
+        let nxt = r_prime * r;
+        rot_transition[m][r_idx] = rotations.iter().position(|&x| x == nxt).unwrap() as u8;
+      }
       for (c_idx, &c) in CUBELETS.iter().enumerate() {
         for (r_idx, &r) in rotations.iter().enumerate() {
           let next_r = if mv.normal.dot(r * c) > 0 { r_prime * r } else { r };
@@ -180,7 +185,7 @@ impl Tables {
           let curr = queue[qh];
           qh += 1;
           for m in 0..12 {
-            let nxt_r = transition[m][c_idx][curr] as usize;
+            let nxt_r = rot_transition[m][curr] as usize;
             if dist[c_idx][nxt_r] == 255 {
               dist[c_idx][nxt_r] = dist[c_idx][curr] + 1;
               queue[qt] = nxt_r;
@@ -225,8 +230,9 @@ impl FastCube {
   pub fn from_cube(cube: &Cube) -> Self {
     let t = Tables::get();
     let mut arr = [0u8; 26];
-    for (i, &(c, r)) in cube.iter().enumerate() {
-      assert_eq!(c, CUBELETS[i]);
+    for (i, &c) in CUBELETS.iter().enumerate() {
+      let &(_, r) =
+        if cube[i].0 == c { &cube[i] } else { cube.iter().find(|&&(c2, _)| c2 == c).expect("missing cubelet") };
       arr[i] = t.rotations.iter().position(|&x| x == r).expect("invalid rotation") as u8;
     }
     Self(arr)
