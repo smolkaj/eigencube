@@ -1,4 +1,4 @@
-use eigencube_perf::{log, shuffle, solve, Tables, SOLVED_CUBE};
+use eigencube_perf::{log, shuffle, solve, SOLVED_CUBE};
 use std::env;
 
 fn print_usage() {
@@ -8,11 +8,10 @@ fn print_usage() {
 
 fn main() {
   let args: Vec<String> = env::args().collect();
-  let tables = Tables::get();
   match args.len() {
     1 => {
       log("Solving scrambled cube (seed=42)...");
-      let scrambled = shuffle(tables, 100_000, 42, SOLVED_CUBE);
+      let scrambled = shuffle(100_000, 42, SOLVED_CUBE);
       solve(scrambled);
     }
     2 if args[1] == "--help" || args[1] == "-h" => {
@@ -21,7 +20,7 @@ fn main() {
     2 => match args[1].parse::<u64>() {
       Ok(seed) => {
         log(&format!("Solving scrambled cube (seed={})...", seed));
-        let scrambled = shuffle(tables, 100_000, seed, SOLVED_CUBE);
+        let scrambled = shuffle(100_000, seed, SOLVED_CUBE);
         solve(scrambled);
       }
       Err(_) => {

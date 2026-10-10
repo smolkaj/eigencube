@@ -10,6 +10,16 @@ fn test_counts_and_group_size() {
 }
 
 #[test]
+fn test_linear_algebra_invariants() {
+  let c = Vec3(1, 1, 1);
+  assert!(is_cubelet_solved(c, Mat3::ID));
+  let rot_x = MOVES[0].rot_mat();
+  assert!(!is_cubelet_solved(c, rot_x));
+  assert_eq!(Vec3(1, 0, 0).dot(Vec3(0, 1, 0)), 0);
+  assert_eq!(Vec3(1, 2, 3).dot(Vec3(4, 5, 6)), 32);
+}
+
+#[test]
 fn test_cubelet_index_groups() {
   for (i, &c) in CUBELETS.iter().enumerate() {
     assert_eq!(TOP_CUBELETS.contains(&i), c.2 == 1, "mismatch on TOP_CUBELETS for index {}", i);
@@ -92,7 +102,7 @@ fn test_deterministic_budget_exhaustion() {
 #[test]
 fn test_full_scramble_solve() {
   let tables = Tables::get();
-  let scrambled = shuffle(tables, 100, 42, SOLVED_CUBE);
+  let scrambled = shuffle(100, 42, SOLVED_CUBE);
   let moves = solve(scrambled);
   let mut curr = scrambled;
   for m in &moves {
@@ -100,4 +110,19 @@ fn test_full_scramble_solve() {
     curr = apply_move(tables, m_idx, &curr);
   }
   assert!(is_cube_solved(tables, &curr));
+}
+
+#[test]
+fn test_successive_solves_independent() {
+  let tables = Tables::get();
+  for seed in [1, 2] {
+    let scrambled = shuffle(50, seed, SOLVED_CUBE);
+    let moves = solve(scrambled);
+    let mut curr = scrambled;
+    for m in &moves {
+      let m_idx = MOVES.iter().position(|x| x == m).unwrap();
+      curr = apply_move(tables, m_idx, &curr);
+    }
+    assert!(is_cube_solved(tables, &curr));
+  }
 }

@@ -476,7 +476,8 @@ pub fn solve_endgame(tables: &Tables, cube: &mut FastCube, moves: &mut Vec<Move>
   }
 }
 
-pub fn shuffle(tables: &Tables, iters: usize, seed: u64, cube: FastCube) -> FastCube {
+pub fn shuffle(iters: usize, seed: u64, cube: FastCube) -> FastCube {
+  let tables = Tables::get();
   let mut rng = Rng::new(seed);
   (0..iters).fold(cube, |c, _| apply_move(tables, (rng.next_f64() * 12.0) as usize % 12, &c))
 }
