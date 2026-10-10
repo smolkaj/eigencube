@@ -72,14 +72,6 @@ let apply_move move (cube : cube) : cube =
 
 let total_moves_simulated = ref 0
 
-let reconstruct visited dst =
-  let rec loop curr acc =
-    match Hashtbl.find visited curr with
-    | Some (_, Some (p, mv)) -> loop p (mv :: acc)
-    | _ -> acc
-  in
-  (dst, loop dst [])
-
 let should_prune last_move move =
   match last_move with
   | None -> false
@@ -102,9 +94,21 @@ let random_gauss ~mean ~stdev =
 let astar (type state) ~(start : state) ~(is_goal : state -> bool)
     ~(apply_move : move -> state -> state) ?(heuristic = fun _ -> 0.0)
     ?(random_weight = 0.0) ?(max_moves = 100_000) () =
+  let open struct
+    type node = { cost : int; prev : (state * move) option }
+  end in
   let rec attempt budget =
     let visited = Hashtbl.Poly.create ~size:16384 () in
-    Hashtbl.set visited ~key:start ~data:(0, None);
+    Hashtbl.set visited ~key:start ~data:{ cost = 0; prev = None };
+
+    let reconstruct dst =
+      let rec loop curr acc =
+        match Hashtbl.find visited curr with
+        | Some { prev = Some (p, mv); _ } -> loop p (mv :: acc)
+        | _ -> acc
+      in
+      (dst, loop dst [])
+    in
 
     let rec expand_moves src next_cost last_move mvs frontier simulated =
       match mvs with
@@ -119,14 +123,15 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
           let dst = apply_move move src in
           let dominated =
             match Hashtbl.find visited dst with
-            | Some (c, _) -> c <= next_cost
+            | Some n -> n.cost <= next_cost
             | None -> false
           in
           if dominated then
             expand_moves src next_cost last_move rest frontier simulated
           else begin
-            Hashtbl.set visited ~key:dst ~data:(next_cost, Some (src, move));
-            if is_goal dst then `Found (reconstruct visited dst)
+            Hashtbl.set visited ~key:dst
+              ~data:{ cost = next_cost; prev = Some (src, move) };
+            if is_goal dst then `Found (reconstruct dst)
             else
               let hw =
                 if Float.(random_weight > 0.0) then
@@ -145,7 +150,7 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
       match Fheap.pop frontier with
       | None -> None
       | Some ((_prio, src), rest_frontier) -> (
-        let cost, prev = Hashtbl.find_exn visited src in
+        let { cost; prev } = Hashtbl.find_exn visited src in
         let last_move = Option.map ~f:snd prev in
         match
           expand_moves src (cost + 1) last_move moves rest_frontier simulated
