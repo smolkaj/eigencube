@@ -20,9 +20,7 @@ type mat = vec * vec * vec [@@deriving compare, sexp]
 type move = { normal : vec; dir : int } [@@deriving compare, sexp]
 
 (* 26 cubelets, each mapped from canonical position to current 3x3 rotation *)
-module Cube = struct
-  type t = mat Map.M(Vec).t
-end
+type cube = mat Map.M(Vec).t
 
 let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
 let dot (x1, y1, z1) (x2, y2, z2) = (x1 * x2) + (y1 * y2) + (z1 * z2)
@@ -76,17 +74,17 @@ let is_cubelet_solved c r =
   let sticker_directions = r *@* colors in
   sticker_directions = colors
 
-let is_cube_solved (cube : Cube.t) =
+let is_cube_solved (cube : cube) =
   Map.for_alli cube ~f:(fun ~key:c ~data:r -> is_cubelet_solved c r)
 
 let is_cubelet_pos_solved c r = r *@ c = c
 
-let solved_cube : Cube.t =
+let solved_cube : cube =
   List.fold cubelets
     ~init:(Map.empty (module Vec))
     ~f:(fun acc c -> Map.set acc ~key:c ~data:id3)
 
-let apply_move move (cube : Cube.t) : Cube.t =
+let apply_move move (cube : cube) : cube =
   let v = move.normal and rm = rot_mat move in
   Map.mapi cube ~f:(fun ~key:c ~data:r ->
       if dot v (r *@ c) > 0 then rm *@* r else r
@@ -242,21 +240,21 @@ let norm_p05 group ~f =
   in
   sum *. sum
 
-let top_layer_heuristic (cube : Cube.t) =
+let top_layer_heuristic (cube : cube) =
   norm_p05 top_cubelets ~f:(fun c -> min_moves_to_solved c (Map.find_exn cube c))
   /. 8.0
 
-let middle_layer_heuristic (cube : Cube.t) =
+let middle_layer_heuristic (cube : cube) =
   norm_p05 middle_cubelets ~f:(fun c ->
       min_moves_to_solved c (Map.find_exn cube c)
   )
   /. 4.0
 
-let bottom_layer_edge_heuristic (cube : Cube.t) =
+let bottom_layer_edge_heuristic (cube : cube) =
   norm_p05 bottom_edges ~f:(fun c -> min_moves_to_solved c (Map.find_exn cube c))
   /. 3.0
 
-let bottom_layer_corner_heuristic (cube : Cube.t) =
+let bottom_layer_corner_heuristic (cube : cube) =
   norm_p05 top_cubelets ~f:(fun c -> min_moves_to_solved c (Map.find_exn cube c))
   /. 5.0
   +. norm_p05 middle_belt_cubelets ~f:(fun c ->
@@ -269,19 +267,19 @@ let bottom_layer_corner_heuristic (cube : Cube.t) =
      )
      /. 8.0
 
-let count_solved ~f (cube : Cube.t) =
+let count_solved ~f (cube : cube) =
   Map.fold cube ~init:0 ~f:(fun ~key:c ~data:r acc ->
       if f c && is_cubelet_solved c r then acc + 1 else acc
   )
 
-let count_bottom_edges_positioned (cube : Cube.t) =
+let count_bottom_edges_positioned (cube : cube) =
   Map.fold cube ~init:0 ~f:(fun ~key:c ~data:r acc ->
       let _, _, z = c in
       if z = -1 && norm1 c = 2 && r *@ (0, 0, -1) = (0, 0, -1) then acc + 1
       else acc
   )
 
-let count_bottom_corners_positioned (cube : Cube.t) =
+let count_bottom_corners_positioned (cube : cube) =
   Map.fold cube ~init:0 ~f:(fun ~key:c ~data:r acc ->
       let _, _, z = c in
       if z = -1 && norm1 c = 3 && is_cubelet_pos_solved c r then acc + 1
@@ -305,7 +303,7 @@ let solve_layer ~name ~total ~is_goal ~heuristic ~random_weight cube =
   in
   loop 0 cube []
 
-let bottom_left_front_corner (cube : Cube.t) =
+let bottom_left_front_corner (cube : cube) =
   let target = (1, -1, -1) in
   match Map.to_alist cube |> List.find ~f:(fun (c, r) -> r *@ c = target) with
   | Some (c, r) -> (c, r)
@@ -362,7 +360,7 @@ let shuffle ~iters ~seed cube =
     cube
 
 (* Full 3-phase human solver: top layer -> middle edges -> bottom layer & endgame *)
-let solve (cube : Cube.t) =
+let solve (cube : cube) =
   let t0 = Unix.gettimeofday () in
   let start_sim = !total_moves_simulated in
   let c1, s1 =
