@@ -9,7 +9,7 @@ open Poly
 type vec = int * int * int [@@deriving compare, sexp]
 type mat = vec * vec * vec [@@deriving compare, sexp]
 type move = { normal : vec; dir : int } [@@deriving compare, sexp]
-type cube = (vec, mat) Map.Poly.t
+type cube = (vec * mat) list [@@deriving compare, sexp]
 
 let norm1 (x, y, z) = Int.abs x + Int.abs y + Int.abs z
 let dot (x1, y1, z1) (x2, y2, z2) = (x1 * x2) + (y1 * y2) + (z1 * z2)
@@ -58,20 +58,16 @@ let is_cubelet_solved c r =
   sticker_directions = colors
 
 let is_cube_solved (cube : cube) =
-  Map.for_alli cube ~f:(fun ~key:c ~data:r -> is_cubelet_solved c r)
+  List.for_all cube ~f:(fun (c, r) -> is_cubelet_solved c r)
 
 let is_cubelet_pos_solved c r = r *@ c = c
-
-let solved_cube : cube =
-  List.fold cubelets ~init:Map.Poly.empty ~f:(fun acc c ->
-      Map.set acc ~key:c ~data:id3
-  )
+let solved_cube : cube = List.map cubelets ~f:(fun c -> (c, id3))
 
 let apply_move move (cube : cube) : cube =
   let v = move.normal in
   let r' = rot_mat move in
-  Map.mapi cube ~f:(fun ~key:c ~data:r ->
-      if dot v (r *@ c) > 0 then r' *@* r else r
+  List.map cube ~f:(fun (c, r) ->
+      (c, if dot v (r *@ c) > 0 then r' *@* r else r)
   )
 
 let total_moves_simulated = ref 0
@@ -96,13 +92,20 @@ let log fmt =
   printf "[%02d:%02d:%02d] " tm.tm_hour tm.tm_min tm.tm_sec;
   printf (Stdlib.( ^^ ) fmt "\n%!")
 
+(* Central Limit Theorem: sum of 12 uniform random floats has mean 6.0 and variance 1.0 *)
+let random_gauss ~mean ~stdev =
+  let sum =
+    List.init 12 ~f:(fun _ -> Random.float 1.0) |> List.fold ~init:0.0 ~f:( +. )
+  in
+  mean +. (stdev *. (sum -. 6.0))
+
 (* Multi-phase A* search with move-budgeted restarts (1.5x expansion) *)
 let astar (type state) ~(start : state) ~(is_goal : state -> bool)
     ~(apply_move : move -> state -> state) ?(heuristic = fun _ -> 0.0)
     ?(random_weight = 0.0) ?(max_moves = 100_000) () =
   let rec attempt budget =
-    let came_from = Hashtbl.Poly.create ~size:8192 () in
-    let cost_so_far = Hashtbl.Poly.create ~size:8192 () in
+    let came_from = Hashtbl.Poly.create ~size:16384 () in
+    let cost_so_far = Hashtbl.Poly.create ~size:16384 () in
     Hashtbl.set cost_so_far ~key:start ~data:0;
 
     let rec expand_moves src last_move mvs frontier simulated =
@@ -130,10 +133,7 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
             else
               let hw =
                 if Float.(random_weight > 0.0) then
-                  Float.max 0.01
-                    (Random.float_range (1.0 -. random_weight)
-                       (1.0 +. random_weight)
-                    )
+                  Float.max 0.01 (random_gauss ~mean:1.0 ~stdev:random_weight)
                 else 1.0
               in
               let prio = Float.of_int cost +. (hw *. heuristic dst) in
@@ -191,51 +191,45 @@ let min_moves_to_pos =
   let cache = Hashtbl.Poly.create () in
   cubelet_dist ~cache ~is_goal:is_cubelet_pos_solved
 
-let dist_solved c cube = min_moves_to_solved c (Map.find_exn cube c)
-let dist_pos c cube = min_moves_to_pos c (Map.find_exn cube c)
-let top_cubelets = List.filter cubelets ~f:(fun (_, _, z) -> z = 1)
-let middle_belt_cubelets = List.filter cubelets ~f:(fun (_, _, z) -> z = 0)
-let middle_cubelets = top_cubelets @ middle_belt_cubelets
-
-let bottom_edges =
-  List.filter cubelets ~f:(fun ((_, _, z) as c) -> not (z = -1 && norm1 c = 3))
-
-let bottom_cubelets = List.filter cubelets ~f:(fun (_, _, z) -> z = -1)
-
-let norm_p05 group ~f =
+let norm_p05 cube ~cond ~f =
   List.sum
     (module Float)
-    group
-    ~f:(fun item -> Float.sqrt (Float.of_int (f item)))
+    cube
+    ~f:(fun (c, r) -> if cond c then Float.sqrt (Float.of_int (f c r)) else 0.0)
   |> fun sum -> sum *. sum
 
 let top_layer_heuristic (cube : cube) =
-  norm_p05 top_cubelets ~f:(fun c -> dist_solved c cube) /. 8.0
+  norm_p05 cube ~cond:(fun (_, _, z) -> z = 1) ~f:min_moves_to_solved /. 8.0
 
 let middle_layer_heuristic (cube : cube) =
-  norm_p05 middle_cubelets ~f:(fun c -> dist_solved c cube) /. 4.0
+  norm_p05 cube ~cond:(fun (_, _, z) -> z >= 0) ~f:min_moves_to_solved /. 4.0
 
 let bottom_layer_edge_heuristic (cube : cube) =
-  norm_p05 bottom_edges ~f:(fun c -> dist_solved c cube) /. 3.0
+  norm_p05 cube
+    ~cond:(fun ((_, _, z) as c) -> not (z = -1 && norm1 c = 3))
+    ~f:min_moves_to_solved
+  /. 3.0
 
 let bottom_layer_corner_heuristic (cube : cube) =
-  (norm_p05 top_cubelets ~f:(fun c -> dist_solved c cube) /. 5.0)
-  +. (norm_p05 middle_belt_cubelets ~f:(fun c -> dist_solved c cube) /. 3.0)
-  +. norm_p05 bottom_cubelets ~f:(fun c ->
-         if norm1 c = 3 then dist_pos c cube else dist_solved c cube
-     )
+  (norm_p05 cube ~cond:(fun (_, _, z) -> z = 1) ~f:min_moves_to_solved /. 5.0)
+  +. (norm_p05 cube ~cond:(fun (_, _, z) -> z = 0) ~f:min_moves_to_solved /. 3.0)
+  +. norm_p05 cube
+       ~cond:(fun (_, _, z) -> z = -1)
+       ~f:(fun c r ->
+         if norm1 c = 3 then min_moves_to_pos c r else min_moves_to_solved c r
+       )
      /. 8.0
 
 let count_solved ~f (cube : cube) =
-  Map.counti cube ~f:(fun ~key:c ~data:r -> f c && is_cubelet_solved c r)
+  List.count cube ~f:(fun (c, r) -> f c && is_cubelet_solved c r)
 
 let count_bottom_edges_positioned (cube : cube) =
-  Map.counti cube ~f:(fun ~key:((_, _, z) as c) ~data:r ->
+  List.count cube ~f:(fun (((_, _, z) as c), r) ->
       z = -1 && norm1 c = 2 && r *@ (0, 0, -1) = (0, 0, -1)
   )
 
 let count_bottom_corners_positioned (cube : cube) =
-  Map.counti cube ~f:(fun ~key:((_, _, z) as c) ~data:r ->
+  List.count cube ~f:(fun (((_, _, z) as c), r) ->
       z = -1 && norm1 c = 3 && is_cubelet_pos_solved c r
   )
 
@@ -260,7 +254,7 @@ let solve_layer ~name ~total ~is_goal ~heuristic ~random_weight cube =
   loop 0 cube []
 
 let bottom_left_front_corner (cube : cube) =
-  List.find_exn (Map.to_alist cube) ~f:(fun (c, r) -> r *@ c = (1, -1, -1))
+  List.find_exn cube ~f:(fun (c, r) -> r *@ c = (1, -1, -1))
 
 (* Endgame: orient bottom corners using (R' D' R D) * 2/4 and align bottom face *)
 let solve_endgame cube =
