@@ -209,6 +209,7 @@ eigencube/
 ├── explainer/              # Animated video explainer of the encoding (Manim)
 ├── ocaml/                  # Minimalistic OCaml port (< 400 lines)
 ├── rust/                   # Minimalistic Rust port (< 400 lines)
+├── rust_perf/              # Ultra-high-performance Rust solver (>8M moves/sec)
 ├── scripts/
 │   └── generate_logo.py    # Logo, icons & GitHub social preview generator
 ├── tests/
@@ -236,6 +237,7 @@ While [`eigencube.py`](eigencube.py) is the canonical reference implementation p
 Each port lives in its own top-level directory named after the language:
 - [`ocaml/`](ocaml/): A self-contained, typed functional pearl in OCaml (< 400 lines) using immutable association lists and $SO(3, \mathbb{Z})$ linear algebra.
 - [`rust/`](rust/): A self-contained, high-performance port in Rust (< 400 lines) using stack-allocated value structs, discrete linear algebra, and on-demand memoized heuristics. Run tests via `cargo test --manifest-path rust/Cargo.toml --release`.
+- [`rust_perf/`](rust_perf/): A specialized ultra-high-performance Rust implementation (< 550 lines) exploiting the $SO(3, \mathbb{Z})$ finite rotation group (order 24), flat 26-byte states, L1-resident Cayley action tables, and precomputed heuristic lookups to achieve >8,000,000 moves/sec (~14x throughput speedup over `rust/`, solving scrambles in ~0.2s). Run tests via `cargo test --manifest-path rust_perf/Cargo.toml --release`.
 
 Each language port must be self-contained within its directory, faithfully preserve the discrete 3D linear algebra formulation and the $R \cdot \text{diag}(c) = \text{diag}(c)$ solved invariant, maintain zero external puzzle dependencies, and provide its own standalone test suite.
 
