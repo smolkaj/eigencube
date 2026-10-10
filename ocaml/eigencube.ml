@@ -66,8 +66,8 @@ let solved_cube : cube = List.map cubelets ~f:(fun c -> (c, id3))
 let apply_move move (cube : cube) : cube =
   let v = move.normal in
   let r' = rot_mat move in
-  List.map cube ~f:(fun (c, r) ->
-      (c, if dot v (r *@ c) > 0 then r' *@* r else r)
+  List.map cube ~f:(fun ((c, r) as cubelet) ->
+      if dot v (r *@ c) > 0 then (c, r' *@* r) else cubelet
   )
 
 let total_moves_simulated = ref 0
