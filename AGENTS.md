@@ -26,10 +26,10 @@ git worktree remove ../eigencube-<task>
 
 - The user connects remotely over `ghostty` + `mosh` + `zellij`.
 - `mosh` synchronizes character cells and drops terminal graphics protocols (Kitty / Sixel). Do not expect native interactive windows to display over remote terminals, and do not expect the user to view local file artifacts or `file://` links directly.
-- Eigencube is a native desktop application: `eigencube_gui.py` uses Pygame and `eigencube_scanner.py` uses OpenCV.
+- Eigencube is a native desktop application: `eigencube_gui.py` uses Pygame.
 - For UI inspections and visual verification:
   - Run Pygame in headless mode (`SDL_VIDEODRIVER=dummy`) or run off-screen surface rendering.
-  - Export rendered frames or scanner detections to image files (e.g., `pygame.image.save()` or `cv2.imwrite()`).
+  - Export rendered frames to image files (e.g., `pygame.image.save()`).
   - Proactively attach visual diffs/images to PRs for browser inspection.
 
 # Fast local iteration & verification
@@ -43,7 +43,7 @@ git worktree remove ../eigencube-<task>
 - Fast syntax and gate checks prior to review:
   ```sh
   # Compile check
-  python3 -m py_compile eigencube.py eigencube_gui.py eigencube_scanner.py
+  python3 -m py_compile eigencube.py eigencube_gui.py
   # Run test suite
   python3 -m unittest discover tests
   ```
@@ -67,7 +67,6 @@ Whenever investigating or fixing a bug observed by a user or in production:
 2. **Generalize tests to catch the entire class:** Tests must aim to generalize beyond the specific bug and catch a whole class of similar bugs. Never write a test that only guards the one line or exact parameter that failed:
    - For cube rotations, faces, and solver: write round-trip transition tests (e.g., identity cycles like 4x turn, 6x sexy-move, inverse sequence cancellation).
    - For GUI and state machines: test edge-case inputs, rapid key sequences, and state consistency.
-   - For CV / scanner: test color ambiguity thresholds and facelet ordering.
 3. **Close the systemic gap:** The PR must introduce the preventative test or architectural invariant that would have blocked the original regression from merging. Do not declare a bug task complete until the testing blind spot itself is permanently closed.
 
 # Philosophy & invariants

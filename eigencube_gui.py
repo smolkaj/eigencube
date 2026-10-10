@@ -186,15 +186,14 @@ def create_button(text, x, y, width, height, color, text_color):
     return (button_surface, button_rect)
 
 def create_header_buttons(solving=False):
-    button_width, button_height = 150, 40
+    button_width, button_height = 160, 40
     button_y = 10
-    button_spacing = (WIDTH - 3 * button_width) / 4
-    scan_btn = create_button("Scan my cube", button_spacing, button_y, button_width, button_height, COLORS["BLUE"], WHITE)
-    shuffle_btn = create_button("Shuffle", 2 * button_spacing + button_width, button_y, button_width, button_height, COLORS["ORANGE"], WHITE)
+    button_spacing = (WIDTH - 2 * button_width) / 3
+    shuffle_btn = create_button("Shuffle", button_spacing, button_y, button_width, button_height, COLORS["ORANGE"], WHITE)
     solve_text = "Solving..." if solving else "Solve"
     solve_color = COLORS["PROGRESS_BAR"] if solving else COLORS["GREEN"]
-    solve_btn = create_button(solve_text, 3 * button_spacing + 2 * button_width, button_y, button_width, button_height, solve_color, WHITE)
-    return scan_btn, shuffle_btn, solve_btn
+    solve_btn = create_button(solve_text, 2 * button_spacing + button_width, button_y, button_width, button_height, solve_color, WHITE)
+    return shuffle_btn, solve_btn
 
 def render_frame_to_image(cube, output_path=REPO_DIR / "img" / "gui-preview.png", solution=None, move_index=0, current_move=None, solving_cube=None):
     scr = init_display()
@@ -202,8 +201,7 @@ def render_frame_to_image(cube, output_path=REPO_DIR / "img" / "gui-preview.png"
     draw_cube_static(solving_cube if solving_cube else cube)
 
     # Draw header buttons
-    scan_btn, shuffle_btn, solve_btn = create_header_buttons(solving=bool(solving_cube))
-    scr.blit(scan_btn[0], scan_btn[1])
+    shuffle_btn, solve_btn = create_header_buttons(solving=bool(solving_cube))
     scr.blit(shuffle_btn[0], shuffle_btn[1])
     scr.blit(solve_btn[0], solve_btn[1])
 
@@ -277,8 +275,8 @@ def main():
         solve_result = solve(c, progress_callback)
 
     # Create buttons
-    scan_button, shuffle_button, solve_button = create_header_buttons(solving=False)
-    _, _, solving_button = create_header_buttons(solving=True)
+    shuffle_button, solve_button = create_header_buttons(solving=False)
+    _, solving_button = create_header_buttons(solving=True)
 
     while running:
         dt = clock.tick(60) / 1000.0  # Delta time in seconds
@@ -300,9 +298,7 @@ def main():
                 running = False
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left mouse button
-                    if scan_button[1].collidepoint(event.pos):
-                        print("Scan my cube button clicked (no-op for now)")
-                    elif shuffle_button[1].collidepoint(event.pos):
+                    if shuffle_button[1].collidepoint(event.pos):
                         if solve_thread is None and next_cube is None:
                             cube = shuffle(solved_cube, iterations=999, seed=None)
                             original_cube = cube
@@ -360,7 +356,6 @@ def main():
             draw_cube_static(cube)
 
         # Draw buttons
-        screen.blit(scan_button[0], scan_button[1])
         screen.blit(shuffle_button[0], shuffle_button[1])
         if solve_thread is not None:
             screen.blit(solving_button[0], solving_button[1])
