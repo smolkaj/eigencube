@@ -93,6 +93,13 @@ let random_gauss ~mean ~stdev =
 (* Multi-phase A* search with move-budgeted restarts (1.5x expansion) *)
 type 'a node = { cost : int; prev : ('a * move) option }
 
+type 'a entry = {
+  prio : float;
+  cost : int;
+  last_move : move option;
+  state : 'a;
+}
+
 let reconstruct visited dst =
   let rec loop curr acc =
     match Hashtbl.find visited curr with
@@ -106,20 +113,23 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
     ?(random_weight = 0.0) ?(max_moves = 100_000) () =
   let visited = Hashtbl.Poly.create ~size:65536 () in
   let empty_frontier =
-    Fheap.create ~compare:(fun (p1, _, _, _) (p2, _, _, _) ->
-        Float.compare p1 p2
-    )
+    Fheap.create ~compare:(fun a b -> Float.compare a.prio b.prio)
   in
   let rec attempt budget =
     Hashtbl.clear visited;
     Hashtbl.set visited ~key:start ~data:{ cost = 0; prev = None };
-    search budget (Fheap.add empty_frontier (0.0, 0, None, start)) 0
+    search budget
+      (Fheap.add empty_frontier
+         { prio = 0.0; cost = 0; last_move = None; state = start }
+      )
+      0
   and search budget frontier simulated =
     match Fheap.pop frontier with
     | None -> None
-    | Some ((_prio, cost, last_move, src), rest_frontier) ->
+    | Some ({ cost; last_move; state; _ }, rest_frontier) ->
     match
-      expand_moves budget src (cost + 1) last_move moves rest_frontier simulated
+      expand_moves budget state (cost + 1) last_move moves rest_frontier
+        simulated
     with
     | `Found solution -> Some solution
     | `Continue (next_frontier, next_simulated) ->
@@ -154,7 +164,9 @@ let astar (type state) ~(start : state) ~(is_goal : state -> bool)
           in
           let prio = Float.of_int next_cost +. (hw *. heuristic dst) in
           expand_moves budget src next_cost last_move rest
-            (Fheap.add frontier (prio, next_cost, Some move, dst))
+            (Fheap.add frontier
+               { prio; cost = next_cost; last_move = Some move; state = dst }
+            )
             (simulated + 1)
     )
   in
