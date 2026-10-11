@@ -107,7 +107,6 @@ const MID_CUBELETS: [usize; 17] = [1, 2, 4, 5, 7, 8, 10, 11, 13, 15, 16, 18, 19,
 const MID_LAYER: [usize; 8] = [1, 4, 7, 10, 15, 18, 21, 24];
 const BOT_EDGES: [usize; 4] = [3, 9, 14, 20];
 const BOT_CORNERS: [usize; 4] = [0, 6, 17, 23];
-const NON_BOT_CORNERS: [usize; 22] = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20, 21, 22, 24, 25];
 
 pub fn is_cubelet_solved(c: Vec3, r: Mat3) -> bool {
   (r * Mat3::diag(c)) == Mat3::diag(c)
@@ -395,7 +394,7 @@ fn solve_phase<G: Fn(usize, &FastCube) -> bool, H: Fn(usize, &FastCube) -> f64>(
 ) {
   for i in 0..total {
     log(&format!("{name} #{}", i + 1));
-    let (next_c, p) = astar(*c, |x| goal(i, x), |x| heuristic(i, x), rw, 100_000).expect("phase failed");
+    let (next_c, p) = astar(*c, |x| goal(i, x), |x| heuristic(i, x), rw, 30_000).expect("phase failed");
     log(&format!("-> found solution with {} moves", p.len()));
     *c = next_c;
     moves.extend(p);
@@ -447,14 +446,37 @@ pub fn solve(cube: Cube) -> Vec<Move> {
   let t = Tables::get();
 
   let h1 = |i, c: &FastCube| {
-    let (s, d) = if i < 9 { (&TOP_CUBELETS[..], 8.0) } else { (&MID_CUBELETS[..], 4.0) };
-    c.layer_h(s, &t.sqrt_dist_solved, d)
+    if i < 4 {
+      c.layer_h(&TOP_EDGES, &t.sqrt_dist_solved, 4.0)
+    } else if i < 9 {
+      c.layer_h(&TOP_CUBELETS, &t.sqrt_dist_solved, 8.0)
+    } else {
+      let t_s = c.sum_dist(&TOP_CUBELETS, &t.sqrt_dist_solved);
+      let m_s = c.sum_dist(&MID_LAYER, &t.sqrt_dist_solved);
+      let rem = (17usize.saturating_sub(i)).max(1) as f32;
+      ((t_s * t_s) / 4.0 + (m_s * m_s) / rem.max(2.0)) as f64
+    }
   };
-  let h_cross = |_, c: &FastCube| c.layer_h(&NON_BOT_CORNERS, &t.sqrt_dist_solved, 3.0);
-  let h_corners = |_, c: &FastCube| {
-    let (t_s, m_s) = (c.sum_dist(&TOP_CUBELETS, &t.sqrt_dist_solved), c.sum_dist(&MID_LAYER, &t.sqrt_dist_solved));
-    let b_s = c.sum_dist(&BOT_EDGES, &t.sqrt_dist_solved) + c.sum_dist(&BOT_CORNERS, &t.sqrt_dist_pos);
-    ((t_s * t_s) / 5.0 + (m_s * m_s) / 3.0 + (b_s * b_s) / 8.0) as f64
+  let h_cross = |i: usize, c: &FastCube| {
+    let t_s = c.sum_dist(&TOP_CUBELETS, &t.sqrt_dist_solved);
+    let m_s = c.sum_dist(&MID_LAYER, &t.sqrt_dist_solved);
+    if i < 4 {
+      let unoriented = BOT_EDGES.iter().filter(|&&j| t.rotations[c.0[j] as usize].2 .2 != 1).count() as f32;
+      let rem = (4usize.saturating_sub(i)).max(1) as f32;
+      ((t_s * t_s) / 5.0 + (m_s * m_s) / 4.0 + (unoriented * unoriented) / rem.max(2.0)) as f64
+    } else {
+      let b_s = c.sum_dist(&BOT_EDGES, &t.sqrt_dist_solved);
+      let rem = (8usize.saturating_sub(i)).max(1) as f32;
+      ((t_s * t_s) / 5.0 + (m_s * m_s) / 4.0 + (b_s * b_s) / rem.max(2.0)) as f64
+    }
+  };
+  let h_corners = |i: usize, c: &FastCube| {
+    let t_s = c.sum_dist(&TOP_CUBELETS, &t.sqrt_dist_solved);
+    let m_s = c.sum_dist(&MID_LAYER, &t.sqrt_dist_solved);
+    let e_s = c.sum_dist(&BOT_EDGES, &t.sqrt_dist_solved);
+    let c_s = c.sum_dist(&BOT_CORNERS, &t.sqrt_dist_pos);
+    let rem = (4usize.saturating_sub(i)).max(1) as f32;
+    ((t_s * t_s) / 6.0 + (m_s * m_s) / 6.0 + (e_s * e_s) / 6.0 + (c_s * c_s) / rem.max(2.0)) as f64
   };
 
   solve_phase("solving cubelet", 17, 0.25, |i, c| top_done(t, i, c), h1, &mut c, &mut moves);
