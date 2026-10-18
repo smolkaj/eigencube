@@ -1,0 +1,15 @@
+name = "Eigencube"
+uuid = "85e45212-c4fb-4fb1-ae60-2974b3f59656"
+version = "0.1.0"
+authors = ["el-oso <15278831+el-oso@users.noreply.github.com>"]
+
+[deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[compat]
+LinearAlgebra = "1"
+PrecompileTools = "1"
+StaticArrays = "1"
+julia = "1.12"

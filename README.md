@@ -123,6 +123,22 @@ docker run --rm eigencube python eigencube.py 123
 The image uses Pygame's headless video driver. The interactive GUI is better
 run from the virtual environment because it requires access to the host display.
 
+Each Julia port has its own Dockerfile, which installs and precompiles the port
+and its test environment at build time:
+
+```bash
+# Build the image
+docker build -t eigencube-julia-fast julia_fast
+
+# Run the port's test suite (the image's default command)
+docker run --rm eigencube-julia-fast
+
+# Run the solver with a specific seed
+docker run --rm eigencube-julia-fast julia --project=. -m Eigencube 123
+```
+
+`julia_pretty` works the same way, with `-m EigencubePretty`.
+
 ---
 
 ## Usage
@@ -160,6 +176,12 @@ cargo run --manifest-path rust_pretty/Cargo.toml --release -- [seed]
 
 # OCaml typed functional pearl (~3–8s):
 opam exec -- dune exec --root ocaml eigencube -- [seed]
+
+# Fast Julia port (~0.03s, >15M moves/sec):
+julia --project=julia_fast -m Eigencube [seed]
+
+# Textbook linear algebra Julia port (~0.2s):
+julia --project=julia_pretty -m EigencubePretty [seed]
 ```
 
 ### 3. Programmatic Python API
@@ -216,6 +238,8 @@ eigencube/
 ├── ocaml/                  # Minimalistic OCaml port (< 400 lines)
 ├── rust_pretty/            # Minimalistic Rust port (< 400 lines, textbook math)
 ├── rust_fast/              # Ultra-high-performance Rust solver (>10M moves/sec, Cayley L1)
+├── julia_pretty/           # Julia port (< 400 lines, textbook math, ~3x rust_pretty throughput)
+├── julia_fast/             # Fast Julia solver (< 450 lines, >15M moves/sec, A* plus bottom-layer tables)
 ├── scripts/
 │   └── generate_logo.py    # Logo, icons & GitHub social preview generator
 ├── tests/
@@ -244,6 +268,8 @@ Each port or companion implementation lives in its own top-level directory:
 - [`ocaml/`](ocaml/): A self-contained, typed functional pearl in OCaml (< 400 lines) using immutable association lists and $SO(3, \mathbb{Z})$ linear algebra. Run solver via `opam exec -- dune exec --root ocaml eigencube -- [seed]` and tests via `opam exec -- dune test --root ocaml`.
 - [`rust_pretty/`](rust_pretty/): A self-contained, high-performance port in Rust (< 400 lines) faithfully translating the textbook discrete linear algebra and on-demand memoized heuristics. Run solver via `cargo run --manifest-path rust_pretty/Cargo.toml --release -- [seed]` and tests via `cargo test --manifest-path rust_pretty/Cargo.toml --release`.
 - [`rust_fast/`](rust_fast/): A specialized ultra-high-performance companion in Rust (< 500 lines) exploiting the $SO(3, \mathbb{Z})$ finite rotation group (order 24), flat 26-byte states, L1-resident Cayley action tables, and precomputed heuristic lookups to achieve >10,000,000 moves/sec (~16x throughput speedup over `rust_pretty/`, solving scrambles in ~0.02s–0.03s). Run solver via `cargo run --manifest-path rust_fast/Cargo.toml --release -- [seed]` and tests via `cargo test --manifest-path rust_fast/Cargo.toml --release`.
+- [`julia_pretty/`](julia_pretty/): A port in Julia (< 400 lines) written as the textbook linear algebra: cubelets as `StaticArrays` vectors and rotation matrices, moves as callable Rodrigues rotations. From these it tabulates, at load time, the 624 cubelets that moves can produce, each move's action on them, and their distances to solved; the search stores a cube as 26 indices into that table, in buffers sized once per search. It reproduces `rust_pretty/`'s search, so both find the same solution for the same seed, and simulates ~2,200,000 moves/sec (~3x `rust_pretty/`'s throughput). Requires Julia 1.12 or later. Install once via `julia --project=julia_pretty -e 'using Pkg; Pkg.instantiate()'`, run solver via `julia --project=julia_pretty -m EigencubePretty [seed]` and tests via `julia --project=julia_pretty -e 'using Pkg; Pkg.test()'`.
+- [`julia_fast/`](julia_fast/): A fast companion in Julia (< 450 lines) that keeps the matrix model in the hot path: each rotation is stored as one byte (the axes of its first two columns), so a state is 32 bytes, and every move decodes, multiplies and re-encodes the 26 rotations in loops the compiler vectorizes. Distances to solved are closed forms in the trace and diagonal of `R`. It follows the algorithm of the Zig port proposed in #53: A* solves the top and middle layers, then two tables computed at load time (192 bottom-edge and 324 bottom-corner arrangements, each reached by breadth-first search over move sequences that keep the solved layers intact) finish the bottom layer. Its random stream and frontier reproduce that port's, so both find the same solution for the same seed, ~20% shorter on average than `rust_fast/`'s. It simulates >15,000,000 moves/sec and solves seeds 1–20 in ~0.36s, against ~2.5s for `rust_fast/`. Requires Julia 1.12 or later. Install once via `julia --project=julia_fast -e 'using Pkg; Pkg.instantiate()'`, run solver via `julia --project=julia_fast -m Eigencube [seed]` and tests via `julia --project=julia_fast -e 'using Pkg; Pkg.test()'`.
 
 Each language port must be self-contained within its directory, faithfully preserve the discrete 3D linear algebra formulation and the $R \cdot \text{diag}(c) = \text{diag}(c)$ solved invariant, maintain zero external puzzle dependencies, and provide its own standalone test suite.
 
